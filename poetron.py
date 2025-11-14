@@ -29,7 +29,7 @@ class PoetronTokenizer:
     def pad_or_truncate(self, tensor):
         '''
         Args:
-        tensor (torch.Tensor) - a sequence of tokens to pad/truncate
+        tensor (torch.Tensor[int]) - a sequence of tokens to pad/truncate
 
         Returns:
         new_tensor (torch.Tensor[int]) - the sequence of tokens that has
