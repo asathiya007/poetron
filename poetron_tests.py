@@ -185,12 +185,67 @@ def test_get_batch():
             + 'integers outside of tokenizer\'s int to token mapping'
 
 
+def test_get_init_attn_pattern():
+    # TODO: implement this test
+    TEST_CASES = [
+        # tuple(tensor of query vectors, tensor of key vectors, expected
+        # attention pattern)
+    ]
+    pass
+
+
+def test_scale_attn_pattern():
+    # TODO: implement this test
+    TEST_CASES = [
+        # tuple(attention pattern, scaling factor, expected scaled attention
+        # pattern)
+    ]
+    pass
+
+
+def test_apply_subseq_mask():
+    TEST_CASES = [
+        # tuple(attention pattern, expected attention pattern after masking
+        # subsequent tokens)
+    ]
+    pass
+
+
+def test_apply_input_mask():
+    TEST_CASES = [
+        # tuple(attention pattern, expected attention pattern after applying
+        # input mask)
+    ]
+    pass
+
+
+def test_resolve_neg_inf_rows():
+    TEST_CASES = [
+        # tuple(attention pattern, expected attention pattern after resolving
+        # rows with all -inf values)
+    ]
+    pass
+
+
+def test_normalize_attn_pattern():
+    TEST_CASES = [
+        # tuple(attention pattern, expected normalized attention pattern)
+    ]
+    pass
+
+
 if __name__ == '__main__':
     # run tests
     tests = [
         test_get_dataset,
         test_get_tokenizer,
-        test_get_batch
+        test_get_batch,
+        test_get_init_attn_pattern,
+        test_scale_attn_pattern,
+        test_apply_subseq_mask,
+        test_apply_input_mask,
+        test_resolve_neg_inf_rows,
+        test_normalize_attn_pattern
     ]
     for test in tests:
         test()

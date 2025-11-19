@@ -33,6 +33,87 @@ class SelfAttnHead(nn.Module):
         self.k_proj = nn.Linear(embed_dim, attn_head_size)
         self.v_proj = nn.Linear(embed_dim, attn_head_size)
 
+    def _get_init_attn_pattern(q, k):
+        '''
+        Input:
+        q (torch.Tensor[float]) - tensor containing query vectors, shape is
+        (batch size, context size, attn head size)
+        k (torch.Tensor[float]) - tensor containing key vectors, shape is
+        (batch size, context size, attn head size)
+
+        Output:
+        initial attention pattern (torch.Tensor[float]) - initial attention
+        pattern, shape is (batch size, context size, context size)
+        '''
+        return q @ k.mT
+    
+    def _scale_attn_pattern(self, attn_pattern, scaling_factor):
+        '''
+        Input:
+        attn_pattern (torch.Tensor[float]) - attention pattern, shape is
+        (batch size, context size, context size)
+
+        Output:
+        scaled attention pattern (torch.Tensor[float]) - scaled attention pattern,
+        shape is (batch size, context size, context size)
+        '''
+        return attn_pattern * scaling_factor
+    
+    def _apply_subseq_mask(self, attn_pattern):
+        '''
+        Input:
+        attn_pattern (torch.Tensor[float]) - attention pattern, shape is
+        (batch size, context size, context size)
+
+        Output:
+        masked attention pattern (torch.Tensor[float]) - attention pattern, with
+        masking applied to subsequent tokens
+        '''
+        return attn_pattern.masked_fill(self.attn_mask == 0, float('-inf'))
+    
+    def _apply_input_mask(self, attn_pattern):
+        '''
+        Input:
+        attn_pattern (torch.Tensor[float]) - attention pattern, shape is
+        (batch size, context size, context size)
+
+        Output:
+        masked attention pattern (torch.Tensor[float]) - attention pattern, with
+        the input mask applied to each row (across the columns), shape is
+        (batch size, context size, context size)
+        '''
+        attn_pattern[:, :, self.input_mask == 0] = float('-inf')
+        return attn_pattern
+    
+    def _resolve_neg_inf_rows(self, attn_pattern):
+        '''
+        Input:
+        attn_pattern (torch.Tensor[float]) - attention pattern, shape is
+        (batch size, context size, context size)
+
+        Output:
+        resolved attention pattern (torch.Tensor[float]) - attention pattern where
+        all rows containing all -inf values are resolved, shape is (batch size,
+        context size, context size)
+        '''
+        is_row_all_neginf = (attn_pattern == float('-inf')).all(dim=-1)
+        batch_idxs = torch.nonzero(is_row_all_neginf)[:, 0]
+        row_idxs = torch.nonzero(is_row_all_neginf)[:, 1]
+        attn_pattern[batch_idxs, row_idxs, row_idxs] = 1
+        return attn_pattern
+    
+    def _normalize_attn_pattern(self, attn_pattern):
+        '''
+        Input:
+        attn_pattern (torch.Tensor[float]) - attention pattern, shape is
+        (batch size, context size, context size)
+
+        Output:
+        normalized attention pattern (torch.Tensor[float]), where all rows sum
+        to 1
+        '''
+        return torch.softmax(masked_attn_pattern, dim=-1)
+
     def forward(self, x):
         # get query, key, and value projections
         # input: x
@@ -47,30 +128,23 @@ class SelfAttnHead(nn.Module):
 
         # TODO: add tests for code to get attention patterns
 
-        # get attention patterns
-        # inputs: q, k.mT
-        # input shapes: (batch size, context size, attn head size),
-        # (batch size, attn head size, context_size)
-        # output: normalized attention pattern
-        # output shape: (batch size, context size, context size)
-        attn_pattern = q @ k.mT  # initial attention pattern
+        # get attention pattern
+        init_attn_pattern = self._get_init_attn_pattern(q, k)
         # scaled attention pattern (scaled for numerical stability)
-        scaled_attn_pattern = attn_pattern / torch.sqrt(self.attn_head_size)
+        scaled_attn_pattern = self._scale_attn_pattern(
+            init_attn_pattern, 1 / torch.sqrt(self.attn_head_size))
         # masked attention pattern (masking applied to subsequent tokens)
-        masked_attn_pattern = scaled_attn_pattern.masked_fill(
-            self.attn_mask == 0, float('-inf'))
+        masked_attn_pattern = self._apply_subseq_mask(scaled_attn_pattern)
         # masked attention pattern (input mask applied)
-        masked_attn_pattern[:, :, self.input_mask == 0] = float('-inf')
+        masked_attn_pattern = self._apply_input_mask(masked_attn_pattern)
         # if any row of the attention pattern is all -infinity, set the value
         # where the row and column indices are equal to 1, so those token
         # embeddings are enriched using only info that corresponds to that token
         # and not other tokens
-        is_row_all_neginf = (masked_attn_pattern == float('-inf')).all(dim=-1)
-        batch_idxs = torch.nonzero(is_row_all_neginf)[:, 0]
-        row_idxs = torch.nonzero(is_row_all_neginf)[:, 1]
-        masked_attn_pattern[batch_idxs, row_idxs, row_idxs] = 1
+        masked_attn_pattern = self._resolve_neg_inf_rows(masked_attn_pattern)
         # normalize attention pattern with softmax function, across rows
-        normalized_attn_pattern = torch.softmax(masked_attn_pattern, dim=-1)
+        normalized_attn_pattern = self._normalize_attn_pattern(
+            masked_attn_pattern)
 
         # collect info across multiple token embeddings
         # inputs: normalized attn pattern, v
