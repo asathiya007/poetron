@@ -15,7 +15,8 @@ class SelfAttnHead(nn.Module):
         as well as attention head output
         context_size (int) - number of tokens in a single input
         input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
-        ignore (like padding tokens), 1 for tokens to collect info from)
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (batch size, context size)
         '''
         super().__init__()
         self.embed_dim = embed_dim
@@ -82,8 +83,10 @@ class SelfAttnHead(nn.Module):
         the input mask applied to each row (across the columns), shape is
         (batch size, context size, context size)
         '''
-        attn_pattern[:, :, self.input_mask == 0] = float('-inf')
-        return attn_pattern
+        return attn_pattern.masked_fill(
+            # extra dimension added at dimension index 1 for broadcasting
+            # each input mask across the rows of the corresponding batch input
+            self.input_mask[:, None, :] == 0, float('-inf'))
     
     def _resolve_neg_inf_rows(self, attn_pattern):
         '''
