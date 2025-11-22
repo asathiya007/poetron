@@ -33,7 +33,7 @@ class SelfAttnHead(nn.Module):
         self.k_proj = nn.Linear(embed_dim, attn_head_size)
         self.v_proj = nn.Linear(embed_dim, attn_head_size)
 
-    def _get_init_attn_pattern(q, k):
+    def _get_init_attn_pattern(self, q, k):
         '''
         Input:
         q (torch.Tensor[float]) - tensor containing query vectors, shape is

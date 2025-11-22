@@ -1,4 +1,5 @@
 from poetron import Poetron, INT_DATA_TYPE
+from poetron_model import SelfAttnHead
 import torch
 
 
@@ -186,12 +187,52 @@ def test_get_batch():
 
 
 def test_get_init_attn_pattern():
-    # TODO: implement this test
     TEST_CASES = [
-        # tuple(tensor of query vectors, tensor of key vectors, expected
-        # attention pattern)
+        # tuple(attention head size, context size, tensor of query vectors,
+        # tensor of key vectors, expected attention pattern)
+        (
+            torch.ones((4, 5, 10)).type(torch.float32),
+            torch.ones((4, 5, 10)).type(torch.float32) * 2,
+            torch.ones((4, 5, 5)).type(torch.float32) * 20
+        ),
+        (
+            torch.ones((10, 4, 8)).type(torch.float32),
+            torch.ones((10, 4, 8)).type(torch.float32) * 1.1,
+            torch.ones((10, 4, 4)).type(torch.float32) * 8.8
+        ),
+        (
+            torch.ones((1, 10, 4)).type(torch.float32) * 1.25,
+            torch.ones((1, 10, 4)).type(torch.float32) * 2,
+            torch.ones((1, 10, 10)).type(torch.float32) * 10
+        ),
+        (
+            torch.cat([
+                torch.ones((2, 5, 10)).type(torch.float32),
+                torch.ones((2, 5, 10)).type(torch.float32) * 1.25
+            ], dim=0),
+            torch.cat([
+                torch.ones((2, 5, 10)).type(torch.float32) * 2,
+                torch.ones((2, 5, 10)).type(torch.float32) * 4,
+            ], dim=0),
+            torch.cat([
+                torch.ones((2, 5, 5)).type(torch.float32) * 20,
+                torch.ones((2, 5, 5)).type(torch.float32) * 50
+            ], dim=0)
+        )
     ]
-    pass
+    DEFAULT_EMBED_DIM = 20
+    for i in range(len(TEST_CASES)):
+        test_case = TEST_CASES[i]
+        q, k, exp_attn_pattern = test_case
+        attn_head_size = q.shape[2]
+        context_size = q.shape[1]
+        input_mask = torch.ones((context_size,))
+        sah = SelfAttnHead(
+            DEFAULT_EMBED_DIM, attn_head_size, context_size, input_mask)
+        act_attn_pattern = sah._get_init_attn_pattern(q, k)
+        assert torch.equal(exp_attn_pattern, act_attn_pattern),\
+            'Expected and actual attention patterns don\'t match for test '\
+            + f'case {i + 1}. Expected: {exp_attn_pattern}, Actual: {act_attn_pattern}'
 
 
 def test_scale_attn_pattern():
