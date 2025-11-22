@@ -236,12 +236,52 @@ def test_get_init_attn_pattern():
 
 
 def test_scale_attn_pattern():
-    # TODO: implement this test
     TEST_CASES = [
         # tuple(attention pattern, scaling factor, expected scaled attention
         # pattern)
+        (
+            torch.ones((4, 5, 5)).type(torch.float32) * 20,
+            0.6,
+            torch.ones((4, 5, 5)).type(torch.float32) * 12,
+        ),
+        (
+            torch.ones((10, 4, 4)).type(torch.float32) * 8.8,
+            10,
+            torch.ones((10, 4, 4)).type(torch.float32) * 88
+        ),
+        (
+            torch.ones((1, 10, 10)).type(torch.float32) * 10,
+            0.4,
+            torch.ones((1, 10, 10)).type(torch.float32) * 4
+        ),
+        (
+            torch.cat([
+                torch.ones((2, 5, 5)).type(torch.float32) * 20,
+                torch.ones((2, 5, 5)).type(torch.float32) * 50
+            ], dim=0),
+            0.1,
+            torch.cat([
+                torch.ones((2, 5, 5)).type(torch.float32) * 2,
+                torch.ones((2, 5, 5)).type(torch.float32) * 5
+            ], dim=0)
+        )
     ]
-    pass
+    DEFAULT_EMBED_DIM = 20
+    DEFAULT_ATTN_HEAD_SIZE = 10
+    for i in range(len(TEST_CASES)):
+        test_case = TEST_CASES[i]
+        attn_pattern, scaling_factor, exp_scaled_attn_pattern = test_case
+        context_size = attn_pattern.shape[1]
+        input_mask = torch.ones((context_size,))
+        sah = SelfAttnHead(
+            DEFAULT_EMBED_DIM, DEFAULT_ATTN_HEAD_SIZE, context_size,
+            input_mask)
+        act_scaled_attn_pattern = sah._scale_attn_pattern(
+            attn_pattern, scaling_factor)
+        assert torch.equal(exp_scaled_attn_pattern, act_scaled_attn_pattern),\
+            'Expected and actual attention patterns don\'t match for test '\
+            + f'case {i + 1}. Expected: {exp_scaled_attn_pattern}, Actual: '\
+            + f'{act_scaled_attn_pattern}'
 
 
 def test_apply_subseq_mask():
