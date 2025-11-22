@@ -3,6 +3,11 @@ from poetron_model import SelfAttnHead
 import torch
 
 
+# placeholder constants
+PLACEHOLDER_EMBED_DIM = 20
+PLACEHOLDER_ATTN_HEAD_SIZE = 10
+
+
 def test_get_dataset():
     # get dataset DataFrame
     p = Poetron()
@@ -191,36 +196,35 @@ def test_get_init_attn_pattern():
         # tuple(attention head size, context size, tensor of query vectors,
         # tensor of key vectors, expected attention pattern)
         (
-            torch.ones((4, 5, 10)).type(torch.float32),
-            torch.ones((4, 5, 10)).type(torch.float32) * 2,
-            torch.ones((4, 5, 5)).type(torch.float32) * 20
+            torch.ones((4, 5, 10)),
+            torch.ones((4, 5, 10)) * 2,
+            torch.ones((4, 5, 5)) * 20
         ),
         (
-            torch.ones((10, 4, 8)).type(torch.float32),
-            torch.ones((10, 4, 8)).type(torch.float32) * 1.1,
-            torch.ones((10, 4, 4)).type(torch.float32) * 8.8
+            torch.ones((10, 4, 8)),
+            torch.ones((10, 4, 8)) * 1.1,
+            torch.ones((10, 4, 4)) * 8.8
         ),
         (
-            torch.ones((1, 10, 4)).type(torch.float32) * 1.25,
-            torch.ones((1, 10, 4)).type(torch.float32) * 2,
-            torch.ones((1, 10, 10)).type(torch.float32) * 10
+            torch.ones((1, 10, 4)) * 1.25,
+            torch.ones((1, 10, 4)) * 2,
+            torch.ones((1, 10, 10)) * 10
         ),
         (
             torch.cat([
-                torch.ones((2, 5, 10)).type(torch.float32),
-                torch.ones((2, 5, 10)).type(torch.float32) * 1.25
+                torch.ones((2, 5, 10)),
+                torch.ones((2, 5, 10)) * 1.25
             ], dim=0),
             torch.cat([
-                torch.ones((2, 5, 10)).type(torch.float32) * 2,
-                torch.ones((2, 5, 10)).type(torch.float32) * 4,
+                torch.ones((2, 5, 10)) * 2,
+                torch.ones((2, 5, 10)) * 4,
             ], dim=0),
             torch.cat([
-                torch.ones((2, 5, 5)).type(torch.float32) * 20,
-                torch.ones((2, 5, 5)).type(torch.float32) * 50
+                torch.ones((2, 5, 5)) * 20,
+                torch.ones((2, 5, 5)) * 50
             ], dim=0)
         )
     ]
-    DEFAULT_EMBED_DIM = 20
     for i in range(len(TEST_CASES)):
         test_case = TEST_CASES[i]
         q, k, exp_attn_pattern = test_case
@@ -228,7 +232,7 @@ def test_get_init_attn_pattern():
         context_size = q.shape[1]
         input_mask = torch.ones((context_size,))
         sah = SelfAttnHead(
-            DEFAULT_EMBED_DIM, attn_head_size, context_size, input_mask)
+            PLACEHOLDER_EMBED_DIM, attn_head_size, context_size, input_mask)
         act_attn_pattern = sah._get_init_attn_pattern(q, k)
         assert torch.equal(exp_attn_pattern, act_attn_pattern),\
             'Expected and actual attention patterns don\'t match for test '\
@@ -240,41 +244,39 @@ def test_scale_attn_pattern():
         # tuple(attention pattern, scaling factor, expected scaled attention
         # pattern)
         (
-            torch.ones((4, 5, 5)).type(torch.float32) * 20,
+            torch.ones((4, 5, 5)) * 20,
             0.6,
-            torch.ones((4, 5, 5)).type(torch.float32) * 12,
+            torch.ones((4, 5, 5)) * 12,
         ),
         (
-            torch.ones((10, 4, 4)).type(torch.float32) * 8.8,
+            torch.ones((10, 4, 4)) * 8.8,
             10,
-            torch.ones((10, 4, 4)).type(torch.float32) * 88
+            torch.ones((10, 4, 4)) * 88
         ),
         (
-            torch.ones((1, 10, 10)).type(torch.float32) * 10,
+            torch.ones((1, 10, 10)) * 10,
             0.4,
-            torch.ones((1, 10, 10)).type(torch.float32) * 4
+            torch.ones((1, 10, 10)) * 4
         ),
         (
             torch.cat([
-                torch.ones((2, 5, 5)).type(torch.float32) * 20,
-                torch.ones((2, 5, 5)).type(torch.float32) * 50
+                torch.ones((2, 5, 5)) * 20,
+                torch.ones((2, 5, 5)) * 50
             ], dim=0),
             0.1,
             torch.cat([
-                torch.ones((2, 5, 5)).type(torch.float32) * 2,
-                torch.ones((2, 5, 5)).type(torch.float32) * 5
+                torch.ones((2, 5, 5)) * 2,
+                torch.ones((2, 5, 5)) * 5
             ], dim=0)
         )
     ]
-    DEFAULT_EMBED_DIM = 20
-    DEFAULT_ATTN_HEAD_SIZE = 10
     for i in range(len(TEST_CASES)):
         test_case = TEST_CASES[i]
         attn_pattern, scaling_factor, exp_scaled_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
         input_mask = torch.ones((context_size,))
         sah = SelfAttnHead(
-            DEFAULT_EMBED_DIM, DEFAULT_ATTN_HEAD_SIZE, context_size,
+            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
             input_mask)
         act_scaled_attn_pattern = sah._scale_attn_pattern(
             attn_pattern, scaling_factor)
@@ -288,8 +290,52 @@ def test_apply_subseq_mask():
     TEST_CASES = [
         # tuple(attention pattern, expected attention pattern after masking
         # subsequent tokens)
+        (
+            torch.ones((4, 5, 5)) * 12,
+            torch.stack([torch.Tensor([
+                [12] * i + [float('-inf')] * (5 - i) for i in range(1, 6)
+            ])] * 4, dim=0)
+        ),
+        (
+            torch.ones((10, 4, 4)) * 88,
+            torch.stack([torch.Tensor([
+                [88] * i + [float('-inf')] * (4 - i) for i in range(1, 5)
+            ])] * 10, dim=0)
+        ),
+        (
+            torch.ones((1, 10, 10)) * 4,
+            torch.stack([torch.Tensor([
+                [4] * i + [float('-inf')] * (10 - i) for i in range(1, 11)
+            ])], dim=0)
+        ),
+        (
+            torch.cat([
+                torch.ones((2, 5, 5)) * 2,
+                torch.ones((2, 5, 5)) * 5
+            ], dim=0),
+            torch.cat([
+                torch.stack([torch.Tensor([
+                    [2] * i + [float('-inf')] * (5 - i) for i in range(1, 6)
+                ])] * 2, dim=0),
+                torch.stack([torch.Tensor([
+                    [5] * i + [float('-inf')] * (5 - i) for i in range(1, 6)
+                ])] * 2, dim=0)
+            ], dim=0)
+        )
     ]
-    pass
+    for i in range(len(TEST_CASES)):
+        test_case = TEST_CASES[i]
+        attn_pattern, exp_masked_attn_pattern = test_case
+        context_size = attn_pattern.shape[1]
+        input_mask = torch.ones((context_size,))
+        sah = SelfAttnHead(
+            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
+            input_mask)
+        act_masked_attn_pattern = sah._apply_subseq_mask(attn_pattern)
+        assert torch.equal(exp_masked_attn_pattern, act_masked_attn_pattern),\
+            'Expected and actual attention patterns don\'t match for test '\
+            + f'case {i + 1}. Expected: {exp_masked_attn_pattern}, Actual: '\
+            + f'{act_masked_attn_pattern}'
 
 
 def test_apply_input_mask():
