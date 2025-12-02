@@ -115,7 +115,7 @@ class SelfAttnHead(nn.Module):
         normalized attention pattern (torch.Tensor[float]), where all rows sum
         to 1
         '''
-        return torch.softmax(masked_attn_pattern, dim=-1)
+        return torch.softmax(attn_pattern, dim=-1)
 
     def forward(self, x):
         # get query, key, and value projections

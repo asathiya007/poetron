@@ -491,9 +491,82 @@ def test_resolve_neg_inf_rows():
 
 def test_normalize_attn_pattern():
     TEST_CASES = [
-        # tuple(attention pattern, expected normalized attention pattern)
+        # tuple(attention pattern, input mask, expected normalized attention
+        # pattern)
+        (
+            torch.stack([torch.Tensor(
+                [[float('-inf')] * i + [1] + [float('-inf')] * (4 - i)
+                    for i in range(0, 5)]
+            )] * 4, dim=0),
+            torch.stack([torch.Tensor([0] * 5)] * 4, dim=0),
+            torch.stack([torch.eye(5)] * 4)
+        ),
+        (
+            torch.stack([torch.Tensor(
+                [[1] + [float('-inf')] * 3]
+                + [[float('-inf')] + [88] * i + [float('-inf')] * (3 - i)
+                    for i in range(1, 4)]
+            )] * 10, dim=0),
+            torch.stack([torch.Tensor([0, 1, 1, 1])] * 10, dim=0),
+            torch.stack([torch.Tensor(
+                [[1] + [0] * 3] +
+                [[0] + [1 / i] * i + [0] * (3 - i) for i in range(1, 4)])
+            ] * 10, dim=0)
+        ),
+        (
+            torch.stack([torch.Tensor([
+                [4] * i + [float('-inf')] * (10 - i) for i in range(1, 11)
+            ])], dim=0),
+            torch.stack([torch.Tensor([1] * 10)], dim=0),
+            torch.stack([torch.Tensor([
+                [1 / i] * i + [0] * (10 - i) for i in range(1, 11)])
+            ], dim=0)
+        ),
+        (
+            torch.cat([
+                torch.stack([torch.Tensor(
+                    [[float('-inf')] * i + [1] + [float('-inf')] * (4 - i)
+                     for i in range(0, 2)]
+                    + [[float('-inf')] * 2 + [2] * i + [float('-inf')] *
+                        (3 - i) for i in range(1, 4)]
+                )] * 2, dim=0),
+                torch.stack([torch.Tensor(
+                    [[float('-inf')] * i + [1] + [float('-inf')] * (4 - i)
+                     for i in range(0, 3)]
+                    + [[float('-inf')] * 3 + [5] * i + [float('-inf')] *
+                        (2 - i) for i in range(1, 3)]
+                )] * 2, dim=0)
+            ], dim=0),
+            torch.stack(
+                [torch.Tensor([0, 0, 1, 1, 1])] * 2
+                + [torch.Tensor([0, 0, 0, 1, 1])] * 2, dim=0),
+            torch.cat([
+                torch.stack([torch.Tensor(
+                    [[0] * i + [1] + [0] * (4 - i) for i in range(0, 2)]
+                    + [[0] * 2 + [1 / i] * i + [0] * (3 - i)
+                       for i in range(1, 4)]
+                )] * 2, dim=0),
+                torch.stack([torch.Tensor(
+                    [[0] * i + [1] + [0] * (4 - i) for i in range(0, 3)]
+                    + [[0] * 3 + [1 / i] * i + [0] * (2 - i)
+                       for i in range(1, 3)]
+                )] * 2, dim=0)
+            ], dim=0)
+        )
     ]
-    pass
+    for i in range(len(TEST_CASES)):
+        test_case = TEST_CASES[i]
+        attn_pattern, input_mask, exp_normalized_attn_pattern = test_case
+        context_size = attn_pattern.shape[1]
+        sah = SelfAttnHead(
+            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
+            input_mask)
+        act_normalized_attn_pattern = sah._normalize_attn_pattern(attn_pattern)
+        assert torch.equal(
+            exp_normalized_attn_pattern, act_normalized_attn_pattern),\
+            'Expected and actual attention patterns don\'t match for test '\
+            + f'case {i + 1}. Expected: {exp_normalized_attn_pattern}, '\
+            + f'Actual: {act_normalized_attn_pattern}'
 
 
 if __name__ == '__main__':
