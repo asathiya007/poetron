@@ -411,11 +411,83 @@ def test_apply_input_mask():
 
 def test_resolve_neg_inf_rows():
     TEST_CASES = [
-        # tuple(attention pattern, expected attention pattern after resolving
-        # rows with all -inf values)
+        # tuple(attention pattern, input mask, expected attention pattern after
+        # resolving rows with all -inf values)
+        (
+            torch.stack([torch.Tensor([[float('-inf')] * 5] * 5)] * 4, dim=0),
+            torch.stack([torch.Tensor([0] * 5)] * 4, dim=0),
+            torch.stack([torch.Tensor(
+                [[float('-inf')] * i + [1] + [float('-inf')] * (4 - i)
+                 for i in range(0, 5)]
+            )] * 4, dim=0)
+        ),
+        (
+            torch.stack([torch.Tensor(
+                [[float('-inf')] * 4]
+                + [[float('-inf')] + [88] * i + [float('-inf')] * (3 - i)
+                    for i in range(1, 4)]
+            )] * 10, dim=0),
+            torch.stack([torch.Tensor([0, 1, 1, 1])] * 10, dim=0),
+            torch.stack([torch.Tensor(
+                [[1] + [float('-inf')] * 3]
+                + [[float('-inf')] + [88] * i + [float('-inf')] * (3 - i)
+                    for i in range(1, 4)]
+            )] * 10, dim=0)
+        ),
+        (
+            torch.stack([torch.Tensor([
+                [4] * i + [float('-inf')] * (10 - i) for i in range(1, 11)
+            ])], dim=0),
+            torch.stack([torch.Tensor([1] * 10)], dim=0),
+            torch.stack([torch.Tensor([
+                [4] * i + [float('-inf')] * (10 - i) for i in range(1, 11)
+            ])], dim=0)
+        ),
+        (
+            torch.cat([
+                torch.stack([torch.Tensor(
+                    [[float('-inf')] * 5] * 2
+                    + [[float('-inf')] * 2 + [2] * i + [float('-inf')] *
+                        (3 - i) for i in range(1, 4)]
+                )] * 2, dim=0),
+                torch.stack([torch.Tensor(
+                    [[float('-inf')] * 5] * 3
+                    + [[float('-inf')] * 3 + [5] * i + [float('-inf')] *
+                        (2 - i) for i in range(1, 3)]
+                )] * 2, dim=0)
+            ], dim=0),
+            torch.stack(
+                [torch.Tensor([0, 0, 1, 1, 1])] * 2
+                + [torch.Tensor([0, 0, 0, 1, 1])] * 2, dim=0),
+            torch.cat([
+                torch.stack([torch.Tensor(
+                    [[float('-inf')] * i + [1] + [float('-inf')] * (4 - i)
+                     for i in range(0, 2)]
+                    + [[float('-inf')] * 2 + [2] * i + [float('-inf')] *
+                        (3 - i) for i in range(1, 4)]
+                )] * 2, dim=0),
+                torch.stack([torch.Tensor(
+                    [[float('-inf')] * i + [1] + [float('-inf')] * (4 - i)
+                     for i in range(0, 3)]
+                    + [[float('-inf')] * 3 + [5] * i + [float('-inf')] *
+                        (2 - i) for i in range(1, 3)]
+                )] * 2, dim=0)
+            ], dim=0)
+        )
     ]
-    pass
-
+    for i in range(len(TEST_CASES)):
+        test_case = TEST_CASES[i]
+        attn_pattern, input_mask, exp_resolved_attn_pattern = test_case
+        context_size = attn_pattern.shape[1]
+        sah = SelfAttnHead(
+            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
+            input_mask)
+        act_resolved_attn_pattern = sah._resolve_neg_inf_rows(attn_pattern)
+        assert torch.equal(
+            exp_resolved_attn_pattern, act_resolved_attn_pattern),\
+            'Expected and actual attention patterns don\'t match for test '\
+            + f'case {i + 1}. Expected: {exp_resolved_attn_pattern}, Actual: '\
+            + f'{act_resolved_attn_pattern}'
 
 def test_normalize_attn_pattern():
     TEST_CASES = [
