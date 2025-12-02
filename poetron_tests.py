@@ -191,6 +191,14 @@ def test_get_batch():
             + 'integers outside of tokenizer\'s int to token mapping'
 
 
+# helper function for checking attention patterns
+def _check_attn_pattern(test_case_num, exp_attn_pattern, act_attn_pattern):
+    assert torch.equal(exp_attn_pattern, act_attn_pattern),\
+        'Expected and actual attention patterns don\'t match for test '\
+        + f'case {test_case_num}. Expected: {exp_attn_pattern}, Actual: '\
+        + f'{act_attn_pattern}'
+
+
 def test_get_init_attn_pattern():
     TEST_CASES = [
         # tuple(attention head size, context size, tensor of query vectors,
@@ -234,9 +242,7 @@ def test_get_init_attn_pattern():
         sah = SelfAttnHead(
             PLACEHOLDER_EMBED_DIM, attn_head_size, context_size, input_mask)
         act_attn_pattern = sah._get_init_attn_pattern(q, k)
-        assert torch.equal(exp_attn_pattern, act_attn_pattern),\
-            'Expected and actual attention patterns don\'t match for test '\
-            + f'case {i + 1}. Expected: {exp_attn_pattern}, Actual: {act_attn_pattern}'
+        _check_attn_pattern(i + 1, exp_attn_pattern, act_attn_pattern)
 
 
 def test_scale_attn_pattern():
@@ -280,10 +286,8 @@ def test_scale_attn_pattern():
             input_mask)
         act_scaled_attn_pattern = sah._scale_attn_pattern(
             attn_pattern, scaling_factor)
-        assert torch.equal(exp_scaled_attn_pattern, act_scaled_attn_pattern),\
-            'Expected and actual attention patterns don\'t match for test '\
-            + f'case {i + 1}. Expected: {exp_scaled_attn_pattern}, Actual: '\
-            + f'{act_scaled_attn_pattern}'
+        _check_attn_pattern(
+            i + 1, exp_scaled_attn_pattern, act_scaled_attn_pattern)
 
 
 def test_apply_subseq_mask():
@@ -332,10 +336,8 @@ def test_apply_subseq_mask():
             PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
             input_mask)
         act_masked_attn_pattern = sah._apply_subseq_mask(attn_pattern)
-        assert torch.equal(exp_masked_attn_pattern, act_masked_attn_pattern),\
-            'Expected and actual attention patterns don\'t match for test '\
-            + f'case {i + 1}. Expected: {exp_masked_attn_pattern}, Actual: '\
-            + f'{act_masked_attn_pattern}'
+        _check_attn_pattern(
+            i + 1, exp_masked_attn_pattern, act_masked_attn_pattern)
 
 
 def test_apply_input_mask():
@@ -403,10 +405,8 @@ def test_apply_input_mask():
             PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
             input_mask)
         act_masked_attn_pattern = sah._apply_input_mask(attn_pattern)
-        assert torch.equal(exp_masked_attn_pattern, act_masked_attn_pattern),\
-            'Expected and actual attention patterns don\'t match for test '\
-            + f'case {i + 1}. Expected: {exp_masked_attn_pattern}, Actual: '\
-            + f'{act_masked_attn_pattern}'
+        _check_attn_pattern(
+            i + 1, exp_masked_attn_pattern, act_masked_attn_pattern)
 
 
 def test_resolve_neg_inf_rows():
@@ -483,11 +483,9 @@ def test_resolve_neg_inf_rows():
             PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
             input_mask)
         act_resolved_attn_pattern = sah._resolve_neg_inf_rows(attn_pattern)
-        assert torch.equal(
-            exp_resolved_attn_pattern, act_resolved_attn_pattern),\
-            'Expected and actual attention patterns don\'t match for test '\
-            + f'case {i + 1}. Expected: {exp_resolved_attn_pattern}, Actual: '\
-            + f'{act_resolved_attn_pattern}'
+        _check_attn_pattern(
+            i + 1, exp_resolved_attn_pattern, act_resolved_attn_pattern)
+
 
 def test_normalize_attn_pattern():
     TEST_CASES = [
@@ -562,11 +560,8 @@ def test_normalize_attn_pattern():
             PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
             input_mask)
         act_normalized_attn_pattern = sah._normalize_attn_pattern(attn_pattern)
-        assert torch.equal(
-            exp_normalized_attn_pattern, act_normalized_attn_pattern),\
-            'Expected and actual attention patterns don\'t match for test '\
-            + f'case {i + 1}. Expected: {exp_normalized_attn_pattern}, '\
-            + f'Actual: {act_normalized_attn_pattern}'
+        _check_attn_pattern(
+            i + 1, exp_normalized_attn_pattern, act_normalized_attn_pattern)
 
 
 if __name__ == '__main__':
