@@ -129,13 +129,12 @@ class SelfAttnHead(nn.Module):
         k = self.q_proj(x)
         v = self.v_proj(x)
 
-        # TODO: add tests for code to get attention patterns
-
         # get attention pattern
         init_attn_pattern = self._get_init_attn_pattern(q, k)
         # scaled attention pattern (scaled for numerical stability)
         scaled_attn_pattern = self._scale_attn_pattern(
-            init_attn_pattern, 1 / torch.sqrt(self.attn_head_size))
+            init_attn_pattern,
+            1 / torch.sqrt(torch.Tensor([self.attn_head_size])).item())
         # masked attention pattern (masking applied to subsequent tokens)
         masked_attn_pattern = self._apply_subseq_mask(scaled_attn_pattern)
         # masked attention pattern (input mask applied)

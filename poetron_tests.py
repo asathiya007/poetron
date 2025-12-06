@@ -564,6 +564,29 @@ def test_normalize_attn_pattern():
             i + 1, exp_normalized_attn_pattern, act_normalized_attn_pattern)
 
 
+def test_self_attn_output_shape():
+    TEST_CASES = [
+        # tuple(embedding dimension, attention head size, context size,
+        # batch size)
+        (20, 16, 100, 4),
+        (48, 24, 50, 10),
+        (16, 32, 80, 10),
+        (32, 48, 96, 4)
+    ]
+    for i in range(len(TEST_CASES)):
+        test_case = TEST_CASES[i]
+        embed_dim, attn_head_size, context_size, batch_size = test_case
+        input_mask = torch.stack([torch.ones(context_size)] * batch_size, dim=0)
+        sah = SelfAttnHead(embed_dim, attn_head_size, context_size, input_mask)
+        sah_input = torch.randn((batch_size, context_size, embed_dim))
+        sah_output = sah(sah_input)
+        exp_output_shape = (batch_size, context_size, attn_head_size)
+        act_output_shape = sah_output.shape
+        assert exp_output_shape == act_output_shape, \
+            'Incorrect self-attention output shape. Expected: '\
+            + f'{exp_output_shape}. Actual: {act_output_shape}'
+
+
 if __name__ == '__main__':
     # run tests
     tests = [
@@ -575,7 +598,8 @@ if __name__ == '__main__':
         test_apply_subseq_mask,
         test_apply_input_mask,
         test_resolve_neg_inf_rows,
-        test_normalize_attn_pattern
+        test_normalize_attn_pattern,
+        test_self_attn_output_shape
     ]
     for test in tests:
         test()
