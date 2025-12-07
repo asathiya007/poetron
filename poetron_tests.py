@@ -1,5 +1,5 @@
 from poetron import Poetron, INT_DATA_TYPE
-from poetron_model import SelfAttnHead
+from poetron_model import SelfAttnHead, MultiHeadAttn
 import torch
 
 
@@ -564,6 +564,13 @@ def test_normalize_attn_pattern():
             i + 1, exp_normalized_attn_pattern, act_normalized_attn_pattern)
 
 
+# helper function for checking output shape
+def _check_output_shape(exp_output_shape, act_output_shape):
+    assert exp_output_shape == act_output_shape, \
+        f'Incorrect output shape. Expected: {exp_output_shape}. '\
+        + f'Actual: {act_output_shape}.'
+
+
 def test_self_attn_output_shape():
     TEST_CASES = [
         # tuple(embedding dimension, attention head size, context size,
@@ -582,9 +589,55 @@ def test_self_attn_output_shape():
         sah_output = sah(sah_input)
         exp_output_shape = (batch_size, context_size, attn_head_size)
         act_output_shape = sah_output.shape
-        assert exp_output_shape == act_output_shape, \
-            'Incorrect self-attention output shape. Expected: '\
-            + f'{exp_output_shape}. Actual: {act_output_shape}'
+        _check_output_shape(exp_output_shape, act_output_shape)
+
+
+def test_get_concat_sah_outputs():
+    TEST_CASES = [
+        # tuple(embedding dimension, attention head size, context size,
+        # batch size, number of attention heads)
+        (20, 16, 100, 4, 12),
+        (48, 24, 50, 10, 5),
+        (16, 32, 80, 10, 1),
+        (32, 48, 96, 4, 6)
+    ]
+    for i in range(len(TEST_CASES)):
+        test_case = TEST_CASES[i]
+        embed_dim, attn_head_size, context_size, batch_size, num_attn_heads = \
+            test_case
+        input_mask = torch.stack([torch.ones(context_size)] * batch_size, dim=0)
+        mha = MultiHeadAttn(
+            embed_dim, context_size, input_mask, num_attn_heads, attn_head_size)
+        mha_input = torch.randn((batch_size, context_size, embed_dim))
+        concat_sah_outputs = mha._get_concat_sah_outputs(mha_input)
+        exp_output_shape = (
+            batch_size, context_size, attn_head_size * num_attn_heads)
+        act_output_shape = concat_sah_outputs.shape
+        _check_output_shape(exp_output_shape, act_output_shape)
+
+
+def test_multi_head_attn_output_shape():
+    TEST_CASES = [
+        # tuple(embedding dimension, attention head size, context size,
+        # batch size, number of attention heads)
+        (20, 16, 100, 4, 12),
+        (48, 24, 50, 10, 5),
+        (16, 32, 80, 10, 1),
+        (32, 48, 96, 4, 6)
+    ]
+    for i in range(len(TEST_CASES)):
+        test_case = TEST_CASES[i]
+        embed_dim, attn_head_size, context_size, batch_size, num_attn_heads = \
+            test_case
+        input_mask = torch.stack([torch.ones(context_size)] * batch_size, dim=0)
+        mha = MultiHeadAttn(
+            embed_dim, context_size, input_mask, num_attn_heads, attn_head_size)
+        mha_input = torch.randn((batch_size, context_size, embed_dim))
+        mha_output = mha(mha_input)
+        exp_output_shape = (
+            batch_size, context_size, embed_dim)
+        act_output_shape = mha_output.shape
+        _check_output_shape(exp_output_shape, act_output_shape)
 
 
 if __name__ == '__main__':
@@ -599,7 +652,9 @@ if __name__ == '__main__':
         test_apply_input_mask,
         test_resolve_neg_inf_rows,
         test_normalize_attn_pattern,
-        test_self_attn_output_shape
+        test_self_attn_output_shape,
+        test_get_concat_sah_outputs,
+        test_multi_head_attn_output_shape
     ]
     for test in tests:
         test()

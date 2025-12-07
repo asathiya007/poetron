@@ -9,7 +9,7 @@ import torch.nn.functional as F
 class SelfAttnHead(nn.Module):
     def __init__(self, embed_dim, attn_head_size, context_size, input_mask):
         '''
-        Inputs:
+        Input:
         embed_dim (int) - number of dimensions of token embedding
         attn_head_size (int) - number of dimensions of projection layer outputs
         as well as attention head output
@@ -118,8 +118,19 @@ class SelfAttnHead(nn.Module):
         return torch.softmax(attn_pattern, dim=-1)
 
     def forward(self, x):
-        # get query, key, and value projections
-        # input: x
+        '''
+        Input:
+        x (torch.Tensor[float]) - token embeddings, shape is
+        (batch size, context size, embed dim)
+
+        Output:
+        self-attention head output (torch.Tensor[float]) - information collected
+        across token embeddings to enrich them, shape is
+        (batch size, context size, attn head size)
+        '''
+
+        # get query, key, and value projections of token embeddings
+        # input: x (token embeddings)
         # input shape: (batch size, context size, embed dim)
         # outputs: q, k, v
         # output shapes: (batch size, context size, attn head size),
@@ -159,7 +170,68 @@ class SelfAttnHead(nn.Module):
 
 
 class MultiHeadAttn(nn.Module):
-    pass
+    def __init__(self, embed_dim, context_size, input_mask, num_attn_heads,
+                 attn_head_size):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.context_size = context_size
+        self.input_mask = input_mask
+        self.num_attn_heads = num_attn_heads
+        self.attn_head_size = attn_head_size
+    
+        # create attention heads
+        self.attn_heads = nn.ModuleList([
+            SelfAttnHead(self.embed_dim, self.attn_head_size, self.context_size,
+                         self.input_mask)
+        ] * self.num_attn_heads)
+
+        # output projection layer
+        self.o_proj = nn.Linear(
+            self.attn_head_size * self.num_attn_heads, self.embed_dim)
+
+    def _get_concat_sah_outputs(self, x):
+        '''
+        Input:
+        x (torch.Tensor[float]) - tensor of token embeddings, shape is
+        (batch size, context size, embed dim)
+
+        Output:
+        concatenated self-attention head outputs (torch.Tensor[float]) - tensor
+        of concatentated self-attention head outputs, shape is 
+        (batch size, context size, attn head size * num attn heads)
+        '''
+        self_attn_head_outputs = [sah(x) for sah in self.attn_heads]
+        concat_sah_outputs = torch.cat(self_attn_head_outputs, dim=-1)
+        return concat_sah_outputs
+
+    def forward(self, x):
+        '''
+        Input:
+        x (torch.Tensor[float]) - tensor of token embeddings, shape is
+        (batch size, context size, embed dim)
+
+        Output:
+        multi-head attention output - information collected across token
+        embeddings to enrich them, shape is
+        (batch size, context size, embed dim)
+        '''
+
+        # get information to enrich token embeddings from each self-attention
+        # head
+        concat_sah_outputs = self._get_concat_sah_outputs(x)
+
+        # project the concatenated self-attention head outputs to the embedding
+        # space to get the multi-head attention output (information to enrich
+        # the token embeddings)
+        # input: cocnatenated self-attention head outputs
+        # input shape: (batch size, context size, attn head size * num attn
+        # heads)
+        # output: multi-head attention output
+        # output shape: (batch size, context size, embed dim)
+        multi_head_attn_output = self.o_proj(concat_sah_outputs) 
+
+        # return multi-head attention output
+        return multi_head_attn_output
 
 
 class AttnBlock(nn.Module):
