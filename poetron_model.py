@@ -30,9 +30,9 @@ class SelfAttnHead(nn.Module):
             torch.ones(self.context_size, self.context_size)))
 
         # query, key, and value projection layers
-        self.q_proj = nn.Linear(embed_dim, attn_head_size)
-        self.k_proj = nn.Linear(embed_dim, attn_head_size)
-        self.v_proj = nn.Linear(embed_dim, attn_head_size)
+        self.q_proj = nn.Linear(self.embed_dim, self.attn_head_size)
+        self.k_proj = nn.Linear(self.embed_dim, self.attn_head_size)
+        self.v_proj = nn.Linear(self.embed_dim, self.attn_head_size)
 
     def _get_init_attn_pattern(self, q, k):
         '''
@@ -172,6 +172,17 @@ class SelfAttnHead(nn.Module):
 class MultiHeadAttn(nn.Module):
     def __init__(self, embed_dim, context_size, input_mask, num_attn_heads,
                  attn_head_size):
+        '''
+        Input:
+        embed_dim (int) - number of dimensions of token embedding
+        context_size (int) - number of tokens in a single input
+        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (batch size, context size)
+        num_attn_heads (int) - number of self-attention heads
+        attn_head_size (int) - number of dimensions of projection layer outputs
+        as well as attention head output
+        '''
         super().__init__()
         self.embed_dim = embed_dim
         self.context_size = context_size
@@ -232,6 +243,49 @@ class MultiHeadAttn(nn.Module):
 
         # return multi-head attention output
         return multi_head_attn_output
+
+
+class FeedFwd(nn.Module):
+    def __init__(self, embed_dim, hidden_size, num_hidden_layers):
+        '''
+        Input:
+        embed_dim (int) - number of dimensions of token embedding
+        hidden_size (int) - hidden size of the feed-forward network
+        num_hidden_layers (int) - number of hidden layers in the feed-forward
+        network
+        '''
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.hidden_size = hidden_size
+        self.num_hidden_layers = num_hidden_layers
+
+        # define layers of network
+        input_layer = [
+            nn.Linear(embed_dim, hidden_size),
+            nn.ReLU()
+        ]
+        hidden_layers = [
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU()
+        ] * num_hidden_layers
+        output_layer = [
+            nn.Linear(hidden_size, embed_dim)
+        ]
+        self.layers = nn.Sequential(
+            *(input_layer + hidden_layers + output_layer))
+    
+    def forward(self, x):
+        '''
+        Input:
+        x (torch.Tensor[float]) - tensor of enriched token embeddings, shape is
+        (batch_size, context size, embed dim)
+
+        Output:
+        feed-forward network output (torch.Tensor[float]) - tensor containing
+        information to further enrich token embeddings, shape is
+        (batch size, context size, embed dim)
+        '''
+        return self.layers(x)
 
 
 class AttnBlock(nn.Module):

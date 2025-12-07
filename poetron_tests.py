@@ -1,5 +1,5 @@
 from poetron import Poetron, INT_DATA_TYPE
-from poetron_model import SelfAttnHead, MultiHeadAttn
+from poetron_model import SelfAttnHead, MultiHeadAttn, FeedFwd
 import torch
 
 
@@ -580,8 +580,7 @@ def test_self_attn_output_shape():
         (16, 32, 80, 10),
         (32, 48, 96, 4)
     ]
-    for i in range(len(TEST_CASES)):
-        test_case = TEST_CASES[i]
+    for test_case in TEST_CASES:
         embed_dim, attn_head_size, context_size, batch_size = test_case
         input_mask = torch.stack([torch.ones(context_size)] * batch_size, dim=0)
         sah = SelfAttnHead(embed_dim, attn_head_size, context_size, input_mask)
@@ -601,8 +600,7 @@ def test_get_concat_sah_outputs():
         (16, 32, 80, 10, 1),
         (32, 48, 96, 4, 6)
     ]
-    for i in range(len(TEST_CASES)):
-        test_case = TEST_CASES[i]
+    for test_case in TEST_CASES:
         embed_dim, attn_head_size, context_size, batch_size, num_attn_heads = \
             test_case
         input_mask = torch.stack([torch.ones(context_size)] * batch_size, dim=0)
@@ -625,8 +623,7 @@ def test_multi_head_attn_output_shape():
         (16, 32, 80, 10, 1),
         (32, 48, 96, 4, 6)
     ]
-    for i in range(len(TEST_CASES)):
-        test_case = TEST_CASES[i]
+    for test_case in TEST_CASES:
         embed_dim, attn_head_size, context_size, batch_size, num_attn_heads = \
             test_case
         input_mask = torch.stack([torch.ones(context_size)] * batch_size, dim=0)
@@ -637,6 +634,26 @@ def test_multi_head_attn_output_shape():
         exp_output_shape = (
             batch_size, context_size, embed_dim)
         act_output_shape = mha_output.shape
+        _check_output_shape(exp_output_shape, act_output_shape)
+
+
+def test_feedfwd_output_shape():
+    TEST_CASES = [
+        # tuple(embed dim, hidden size, number of hidden layers, batch size,
+        # context size)
+        (64, 128, 4, 10, 100),
+        (128, 256, 8, 12, 200),
+        (256, 512, 12, 1, 300),
+        (512, 1024, 16, 3, 400)
+    ]
+    for test_case in TEST_CASES:
+        embed_dim, hidden_size, num_hidden_layers, batch_size, context_size = \
+            test_case
+        ffwd = FeedFwd(embed_dim, hidden_size, num_hidden_layers)
+        ffwd_input = torch.randn((batch_size, context_size, embed_dim))
+        exp_output_shape = ffwd_input.shape
+        ffwd_output = ffwd(ffwd_input)
+        act_output_shape = ffwd_output.shape
         _check_output_shape(exp_output_shape, act_output_shape)
 
 
@@ -654,7 +671,8 @@ if __name__ == '__main__':
         test_normalize_attn_pattern,
         test_self_attn_output_shape,
         test_get_concat_sah_outputs,
-        test_multi_head_attn_output_shape
+        test_multi_head_attn_output_shape,
+        test_feedfwd_output_shape
     ]
     for test in tests:
         test()
