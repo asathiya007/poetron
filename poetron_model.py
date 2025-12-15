@@ -3,9 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# TODO: add code for transformer model that uses attention
-
-
 class SelfAttnHead(nn.Module):
     def __init__(self, embed_dim, attn_head_size, context_size, input_mask):
         '''
@@ -289,20 +286,146 @@ class FeedFwd(nn.Module):
 
 
 class AttnBlock(nn.Module):
-    pass
+    def __init__(self, embed_dim, context_size, input_mask, num_attn_heads,
+                 attn_head_size, hidden_size, num_hidden_layers):
+        '''
+        Input:
+        embed_dim (int) - number of dimensions of token embedding
+        context_size (int) - number of tokens in a single input
+        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (batch size, context size)
+        num_attn_heads (int) - number of self-attention heads
+        attn_head_size (int) - number of dimensions of attention projection
+        layer outputs as well as attention head output
+        hidden_size (int) - hidden size of the feed-forward network
+        num_hidden_layers (int) - number of hidden layers in the feed-forward
+        network
+        '''
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.context_size = context_size
+        self.input_mask = input_mask
+        self.num_attn_heads = num_attn_heads
+        self.attn_head_size = attn_head_size
+        self.hidden_size = hidden_size
+        self.num_hidden_layers = num_hidden_layers
+
+        # multi-head attention
+        self.mah = MultiHeadAttn(
+            self.embed_dim, self.context_size, self.input_mask,
+            self.num_attn_heads, self.attn_head_size)
+
+        # layer normalization
+        self.post_mah_layer_norm = nn.LayerNorm(self.embed_dim)
+        self.post_ffwd_layer_norm = nn.LayerNorm(self.embed_dim)
+
+        # feed forward network
+        self.ffwd = FeedFwd(
+            self.embed_dim, self.hidden_size, self.num_hidden_layers)
+
+    def forward(self, x):
+        '''
+        Input:
+        x (torch.Tensor[float]) - tensor of token embeddings, shape is
+        (batch size, context size, embed dim)
+
+        Output:
+        attention block output (torch.Tensor[float]) - tensor of enriched token
+        embeddings, shape is (batch size, context size, embed dim)
+        '''
+        # enrich token embeddings with multi-head attention
+        x += self.mah(x)
+
+        # layer normalization
+        x = self.post_mah_layer_norm(x)
+
+        # enrich token embeddings with feed forward network
+        x += self.ffwd(x)
+
+        # layer normalization
+        x = self.post_ffwd_layer_norm(x)
+
+        # return enriched token embeddings
+        return x
 
 
 class PoetronModel(nn.Module):
     '''
-    A foundation language model for generating/completing three-line
-    poems
+    A language model for generating/completing three-line poems
     '''
-    def __init__(self, num_attn_heads=1, num_attn_blocks=1):
+    def __init__(self, vocab_size, embed_dim, context_size, input_mask,
+                 num_attn_heads, attn_head_size, hidden_size, num_hidden_layers,
+                 num_attn_blocks):
+        '''
+        Input:
+        embed_dim (int) - number of dimensions of token embedding
+        context_size (int) - number of tokens in a single input
+        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (batch size, context size)
+        num_attn_heads (int) - number of self-attention heads per attention
+        block
+        attn_head_size (int) - number of dimensions of attention projection
+        layer outputs as well as attention head output
+        hidden_size (int) - hidden size of the feed-forward network in each
+        attention block
+        num_hidden_layers (int) - number of hidden layers in the feed-forward
+        network of each attention block
+        '''
         super().__init__()
+        self.vocab_size = vocab_size
+        self.embed_dim = embed_dim
+        self.context_size = context_size
+        self.input_mask = input_mask
         self.num_attn_heads = num_attn_heads
+        self.attn_head_size = attn_head_size
+        self.hidden_size = hidden_size
+        self.num_hidden_layers = num_hidden_layers
         self.num_attn_blocks = num_attn_blocks
 
-    def forward(self, x, y, tokenizer):
-        # returns one-hot encoded next-token distributions from y
-        # (TODO: replace with actual model that only accepts x as input)
-        return F.one_hot(y, tokenizer.vocab_size)
+        # input token embedding matrix
+        self.input_embed = nn.Embedding(self.vocab_size, self.embed_dim)
+
+        # TODO: sinusoidal positional embedding
+
+        # attention blocks
+        self.attn_blocks = nn.Sequential(*[
+            AttnBlock(
+                self.embed_dim, self.context_size, self.input_mask,
+                self.num_attn_heads, self.attn_head_size, self.hidden_size,
+                self.num_hidden_layers)
+        ] * self.num_attn_blocks)
+
+        # output projection layer
+        self.o_proj = nn.Linear(self.embed_dim, self.vocab_size)
+
+    def forward(self, x):
+        '''
+        Input:
+        x (torch.Tensor[float]) - tensor of input tokens, shape is
+        (batch size, context size)
+
+        Output:
+        transformer model output (torch.Tensor[float]) - tensor of logits
+        (enriched token embeddings, projected from embed_dim dimensions
+        to vocab_size dimensions), shape is (batch size, context size,
+        vocab size)
+        '''
+
+        # get input token embeddings
+        input_tok_embeds = self.input_embed(x)
+
+        # TODO: get positional embeddings and enrich token embeddings with
+        # positional info
+
+        # enrich token embeddings through attention blocks
+        enriched_tok_embeds = self.attn_blocks(input_tok_embeds)
+
+        # project token embeddings from embed_dim dimensions to vocab_size
+        # dimensions to get logits
+        logits = self.o_proj(enriched_tok_embeds)
+
+        # return logits
+        return logits
+        

@@ -1,11 +1,16 @@
 from poetron import Poetron, INT_DATA_TYPE
-from poetron_model import SelfAttnHead, MultiHeadAttn, FeedFwd
+from poetron_model import SelfAttnHead, MultiHeadAttn, FeedFwd, AttnBlock, \
+    PoetronModel
 import torch
 
 
 # placeholder constants
 PLACEHOLDER_EMBED_DIM = 20
 PLACEHOLDER_ATTN_HEAD_SIZE = 10
+PLACEHOLDER_NUM_ATTN_HEADS = 5
+PLACEHOLDER_HIDDEN_SIZE = 256
+PLACEHOLDER_NUM_HIDDEN_LAYERS = 2
+PLACEHOLDER_NUM_ATTN_BLOCKS = 8
 
 
 def test_get_dataset():
@@ -626,7 +631,7 @@ def test_multi_head_attn_output_shape():
     for test_case in TEST_CASES:
         embed_dim, attn_head_size, context_size, batch_size, num_attn_heads = \
             test_case
-        input_mask = torch.stack([torch.ones(context_size)] * batch_size, dim=0)
+        input_mask = torch.ones((batch_size, context_size))
         mha = MultiHeadAttn(
             embed_dim, context_size, input_mask, num_attn_heads, attn_head_size)
         mha_input = torch.randn((batch_size, context_size, embed_dim))
@@ -657,6 +662,52 @@ def test_feedfwd_output_shape():
         _check_output_shape(exp_output_shape, act_output_shape)
 
 
+def test_attn_block_output_shape():
+    TEST_CASES = [
+        # tuple(batch size, embed dim, context size)
+        (8, 32, 100),
+        (16, 64, 200),
+        (32, 128, 400),
+        (64, 256, 800),
+    ]
+    for test_case in TEST_CASES:
+        batch_size, embed_dim, context_size = test_case
+        input_mask = torch.ones((batch_size, context_size))
+        attn_block = AttnBlock(
+            embed_dim, context_size, input_mask, PLACEHOLDER_NUM_ATTN_HEADS,
+            PLACEHOLDER_ATTN_HEAD_SIZE, PLACEHOLDER_HIDDEN_SIZE,
+            PLACEHOLDER_NUM_HIDDEN_LAYERS)
+        attn_block_input = torch.randn((batch_size, context_size, embed_dim))
+        exp_output_shape = (batch_size, context_size, embed_dim)
+        attn_block_output = attn_block(attn_block_input)
+        act_output_shape = attn_block_output.shape
+        _check_output_shape(exp_output_shape, act_output_shape)
+
+
+def test_poetron_model_output_shape():
+    TEST_CASES = [
+        # tuple(batch size, context size, vocab size)
+        (4, 100, 120),
+        (8, 200, 240),
+        (16, 300, 480),
+        (32, 400, 600)
+    ]
+    for test_case in TEST_CASES:
+        batch_size, context_size, vocab_size = test_case
+        input_mask = torch.ones((batch_size, context_size))
+        pm_input = torch.randint(
+            low=0, high=vocab_size, size=(batch_size, context_size))
+        exp_output_shape = (batch_size, context_size, vocab_size)
+        pm = PoetronModel(
+            vocab_size, PLACEHOLDER_EMBED_DIM, context_size, input_mask,
+            PLACEHOLDER_NUM_ATTN_HEADS, PLACEHOLDER_ATTN_HEAD_SIZE,
+            PLACEHOLDER_HIDDEN_SIZE, PLACEHOLDER_NUM_HIDDEN_LAYERS,
+            PLACEHOLDER_NUM_ATTN_BLOCKS)
+        pm_output = pm(pm_input)
+        act_output_shape = pm_output.shape
+        _check_output_shape(exp_output_shape, act_output_shape)
+
+
 if __name__ == '__main__':
     # run tests
     tests = [
@@ -672,7 +723,9 @@ if __name__ == '__main__':
         test_self_attn_output_shape,
         test_get_concat_sah_outputs,
         test_multi_head_attn_output_shape,
-        test_feedfwd_output_shape
+        test_feedfwd_output_shape,
+        test_attn_block_output_shape,
+        test_poetron_model_output_shape
     ]
     for test in tests:
         test()
