@@ -1,6 +1,6 @@
 from poetron import Poetron, INT_DATA_TYPE
 from poetron_model import SelfAttnHead, MultiHeadAttn, FeedFwd, AttnBlock, \
-    SinPosEmbed, PoetronModel
+    PoetronModel
 import torch
 
 
@@ -11,6 +11,7 @@ PLACEHOLDER_NUM_ATTN_HEADS = 5
 PLACEHOLDER_HIDDEN_SIZE = 256
 PLACEHOLDER_NUM_HIDDEN_LAYERS = 2
 PLACEHOLDER_NUM_ATTN_BLOCKS = 8
+PLACEHOLDER_VOCAB_SIZE = 300
 
 
 def test_get_dataset():
@@ -569,11 +570,10 @@ def test_normalize_attn_pattern():
             i + 1, exp_normalized_attn_pattern, act_normalized_attn_pattern)
 
 
-# helper function for checking output shape
-def _check_output_shape(exp_output_shape, act_output_shape):
-    assert exp_output_shape == act_output_shape, \
-        f'Incorrect output shape. Expected: {exp_output_shape}. '\
-        + f'Actual: {act_output_shape}.'
+# helper function for checking shape
+def _check_shape(exp_shape, act_shape):
+    assert exp_shape == act_shape, f'Incorrect shape. Expected: {exp_shape}. '\
+        + f'Actual: {act_shape}.'
 
 
 def test_self_attn_output_shape():
@@ -593,7 +593,7 @@ def test_self_attn_output_shape():
         sah_output = sah(sah_input)
         exp_output_shape = (batch_size, context_size, attn_head_size)
         act_output_shape = sah_output.shape
-        _check_output_shape(exp_output_shape, act_output_shape)
+        _check_shape(exp_output_shape, act_output_shape)
 
 
 def test_get_concat_sah_outputs():
@@ -616,7 +616,7 @@ def test_get_concat_sah_outputs():
         exp_output_shape = (
             batch_size, context_size, attn_head_size * num_attn_heads)
         act_output_shape = concat_sah_outputs.shape
-        _check_output_shape(exp_output_shape, act_output_shape)
+        _check_shape(exp_output_shape, act_output_shape)
 
 
 def test_multi_head_attn_output_shape():
@@ -639,7 +639,7 @@ def test_multi_head_attn_output_shape():
         exp_output_shape = (
             batch_size, context_size, embed_dim)
         act_output_shape = mha_output.shape
-        _check_output_shape(exp_output_shape, act_output_shape)
+        _check_shape(exp_output_shape, act_output_shape)
 
 
 def test_feedfwd_output_shape():
@@ -659,7 +659,7 @@ def test_feedfwd_output_shape():
         exp_output_shape = ffwd_input.shape
         ffwd_output = ffwd(ffwd_input)
         act_output_shape = ffwd_output.shape
-        _check_output_shape(exp_output_shape, act_output_shape)
+        _check_shape(exp_output_shape, act_output_shape)
 
 
 def test_attn_block_output_shape():
@@ -681,25 +681,39 @@ def test_attn_block_output_shape():
         exp_output_shape = (batch_size, context_size, embed_dim)
         attn_block_output = attn_block(attn_block_input)
         act_output_shape = attn_block_output.shape
-        _check_output_shape(exp_output_shape, act_output_shape)
+        _check_shape(exp_output_shape, act_output_shape)
 
 
-def test_sin_pos_embed_output_shape():
+def test_sin_pos_embeds():
     TEST_CASES = [
-        # tuple(batch size, context size, embed dim)
-        (4, 100, 32),
-        (8, 200, 64),
-        (16, 300, 128),
-        (32, 400, 256)
+        # tuple(context size, embed dim)
+        (100, 32),
+        (200, 64),
+        (300, 128),
+        (400, 256)
     ]
     for test_case in TEST_CASES:
-        batch_size, context_size, embed_dim = test_case
-        spe = SinPosEmbed(embed_dim)
-        spe_input = torch.stack([torch.arange(context_size)] * batch_size)
-        exp_output_shape = (batch_size, context_size, embed_dim)
-        spe_output = spe(spe_input)
-        act_output_shape = spe_output.shape
-        _check_output_shape(exp_output_shape, act_output_shape)
+        context_size, embed_dim = test_case
+        input_mask = torch.ones((1, context_size))
+        pm = PoetronModel(
+            PLACEHOLDER_VOCAB_SIZE, embed_dim, context_size, input_mask,
+            PLACEHOLDER_NUM_ATTN_HEADS, PLACEHOLDER_ATTN_HEAD_SIZE,
+            PLACEHOLDER_HIDDEN_SIZE, PLACEHOLDER_NUM_HIDDEN_LAYERS,
+            PLACEHOLDER_NUM_ATTN_BLOCKS)
+
+        # check sinusoidal positional embedding shape
+        spe = pm.sin_pos_embeds
+        exp_spe_shape = (context_size, embed_dim)
+        act_spe_shape = spe.shape
+        _check_shape(exp_spe_shape, act_spe_shape)
+
+        # check that generated sinusoidal positional embeddings are
+        # deterministic
+        for _ in range(100):
+            new_spe = pm._get_sin_pos_embeds()
+            assert torch.equal(spe, new_spe), \
+                'Sinusoidal positional embeddings are not generated '\
+                + 'deterministically'
 
 
 def test_poetron_model_output_shape():
@@ -723,7 +737,7 @@ def test_poetron_model_output_shape():
             PLACEHOLDER_NUM_ATTN_BLOCKS)
         pm_output = pm(pm_input)
         act_output_shape = pm_output.shape
-        _check_output_shape(exp_output_shape, act_output_shape)
+        _check_shape(exp_output_shape, act_output_shape)
 
 
 if __name__ == '__main__':
@@ -743,7 +757,7 @@ if __name__ == '__main__':
         test_multi_head_attn_output_shape,
         test_feedfwd_output_shape,
         test_attn_block_output_shape,
-        test_sin_pos_embed_output_shape,
+        test_sin_pos_embeds,
         test_poetron_model_output_shape
     ]
     for test in tests:
