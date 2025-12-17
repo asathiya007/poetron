@@ -1,6 +1,6 @@
 from poetron import Poetron, INT_DATA_TYPE
 from poetron_model import SelfAttnHead, MultiHeadAttn, FeedFwd, AttnBlock, \
-    PoetronModel
+    SinPosEmbed, PoetronModel
 import torch
 
 
@@ -684,6 +684,24 @@ def test_attn_block_output_shape():
         _check_output_shape(exp_output_shape, act_output_shape)
 
 
+def test_sin_pos_embed_output_shape():
+    TEST_CASES = [
+        # tuple(batch size, context size, embed dim)
+        (4, 100, 32),
+        (8, 200, 64),
+        (16, 300, 128),
+        (32, 400, 256)
+    ]
+    for test_case in TEST_CASES:
+        batch_size, context_size, embed_dim = test_case
+        spe = SinPosEmbed(embed_dim)
+        spe_input = torch.stack([torch.arange(context_size)] * batch_size)
+        exp_output_shape = (batch_size, context_size, embed_dim)
+        spe_output = spe(spe_input)
+        act_output_shape = spe_output.shape
+        _check_output_shape(exp_output_shape, act_output_shape)
+
+
 def test_poetron_model_output_shape():
     TEST_CASES = [
         # tuple(batch size, context size, vocab size)
@@ -725,6 +743,7 @@ if __name__ == '__main__':
         test_multi_head_attn_output_shape,
         test_feedfwd_output_shape,
         test_attn_block_output_shape,
+        test_sin_pos_embed_output_shape,
         test_poetron_model_output_shape
     ]
     for test in tests:

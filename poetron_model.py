@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import math
 
 
 class SelfAttnHead(nn.Module):
@@ -348,6 +348,47 @@ class AttnBlock(nn.Module):
 
         # return enriched token embeddings
         return x
+    
+
+class SinPosEmbed(nn.Module):
+    def __init__(self, embed_dim):
+        '''
+        Input:
+        embed_dim (int) - number of dimensions of token embedding
+        '''
+        super().__init__()
+        self.embed_dim = embed_dim
+
+    def forward(self, x):
+        '''
+        Input:
+        x (torch.Tensor[int]) - tensor of position integers, shape is
+        (batch size, context size)
+
+        Output:
+        sinusoidal positional embeddings (torch.Tensor[float]) - tensor of
+        sinusoidal positional embeddings, shape is (batch size, context size,
+        embed_dim)
+        '''
+
+        # compute frequencies (log is used to avoid overflow errors, when
+        # raising 10000 to a large power) across all positions, shape is
+        # (batch size, context size, half embed dim)
+        half_embed_dim = math.ceil(self.embed_dim / 2)
+        frequencies = x[:, :, None] * torch.exp(
+            -1 * (2 / self.embed_dim) * torch.arange(half_embed_dim)
+            * math.log(10000))[None, None, :]
+
+        # get sin and cos values, interleave them (by stacking along a new
+        # dimension and reshaping), and truncate at original embed dim
+        # to get positional embeddings of shape (batch size, context size,
+        # embed dim)
+        sin_values = frequencies.sin()
+        cos_values = frequencies.cos()
+        pos_embeddings = torch.stack([sin_values, cos_values], dim=-1)\
+            .reshape(x.shape[0], x.shape[1], half_embed_dim * 2)
+        pos_embeddings = pos_embeddings[:, :, :self.embed_dim]
+        return pos_embeddings
 
 
 class PoetronModel(nn.Module):
@@ -387,7 +428,8 @@ class PoetronModel(nn.Module):
         # input token embedding matrix
         self.input_embed = nn.Embedding(self.vocab_size, self.embed_dim)
 
-        # TODO: sinusoidal positional embedding
+        # sinusoidal positional embedding
+        self.sin_pos_embed = SinPosEmbed(self.embed_dim)
 
         # attention blocks
         self.attn_blocks = nn.Sequential(*[
@@ -416,8 +458,12 @@ class PoetronModel(nn.Module):
         # get input token embeddings
         input_tok_embeds = self.input_embed(x)
 
-        # TODO: get positional embeddings and enrich token embeddings with
+        # get positional embeddings and enrich token embeddings with
         # positional info
+        positions = torch.stack(
+            [torch.arange(self.context_size)] * x.shape[0], dim=0)
+        sin_pos_embeds = self.sin_pos_embed(positions)
+        input_tok_embeds += sin_pos_embeds
 
         # enrich token embeddings through attention blocks
         enriched_tok_embeds = self.attn_blocks(input_tok_embeds)
