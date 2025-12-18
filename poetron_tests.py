@@ -120,7 +120,7 @@ def test_get_tokenizer():
          + '<poem_end>', 20)
     ]
     for text, exp_num_tokens in texts:
-        int_tensors = tokenizer.encode([text])
+        int_tensors, masks = tokenizer.encode([text])
 
         # check tensor data types
         for int_tensor in int_tensors:
@@ -137,27 +137,47 @@ def test_get_tokenizer():
         exp_texts = [text]
         assert decoded_text == exp_texts, 'Incorrect decoding output. '\
             + f'Expected: {exp_texts}. Actual: {decoded_text}'
+        
+        # check mask data types
+        for mask in masks:
+            assert mask.dtype is INT_DATA_TYPE, 'Incorrect data type '\
+                + f'for mask tensor. Expected: {INT_DATA_TYPE}. Actual: '\
+                + f'{mask.dtype}'
 
     # check that batch of encoded inputs are padded to the max length
-    int_tensors = tokenizer.encode(
+    int_tensors, masks = tokenizer.encode(
         list(map(lambda t: t[0], texts)), pad_or_truncate=True)
     # check tensor data types
     for int_tensor in int_tensors:
         assert int_tensor.dtype is INT_DATA_TYPE, 'Incorrect data type '\
             + f'for tokens tensor. Expected: {INT_DATA_TYPE}. Actual: '\
             + f'{int_tensor.dtype}'
-    # check shape of encoded inputs and number of padding tokens
+    # check mask data types
+    for mask in masks:
+        assert mask.dtype is INT_DATA_TYPE, 'Incorrect data type '\
+            + f'for mask tensor. Expected: {INT_DATA_TYPE}. Actual: '\
+            + f'{mask.dtype}'
+    # check shape of encoded inputs, shape of masks, number of padding tokens,
+    # and correctness of mask
     int_tensors = torch.stack(int_tensors, dim=0)
+    masks = torch.stack(masks, dim=0)
     exp_shape = (len(texts), tokenizer.max_length)
     assert int_tensors.shape == exp_shape, 'Incorrect shape of encoding '\
         + f'output. Expected: {exp_shape}. Actual: {int_tensors.shape}'
+    assert masks.shape == exp_shape, 'Incorrect shape of encoding '\
+        + f'output. Expected: {exp_shape}. Actual: {masks.shape}'
     for i in range(len(int_tensors)):
         int_tensor = int_tensors[i]
         padding_tokens = set(
             int_tensor[:tokenizer.max_length - texts[i][1]].tolist())
-        exp_padding_tokens = {tokenizer.token_to_int['<padding>']}
+        exp_padding_tokens = {tokenizer.token_to_int[tokenizer.padding_token]}
         assert padding_tokens == exp_padding_tokens, 'Incorrect padding '\
             f'tokens. Expected: {exp_padding_tokens}. Actual: {padding_tokens}'
+        mask = masks[i]
+        exp_mask = (int_tensor != tokenizer.token_to_int[
+            tokenizer.padding_token]).type(torch.int32)
+        assert torch.equal(exp_mask, mask), f'Incorrect mask. Expected: '\
+            + f'{exp_mask}. Actual: {mask}'
 
 
 def test_get_batch():
@@ -169,7 +189,8 @@ def test_get_batch():
     # check batch inputs and next tokens have expected shape and data type
     batch_sizes = [2, 4, 8, 16, 32, 64]
     for batch_size in batch_sizes:
-        batch_inputs, batch_next_tokens = p._get_batch(batch_size)
+        batch_inputs, batch_input_masks, batch_next_tokens = p._get_batch(
+            batch_size)
 
         # check shape of batch of inputs
         exp_shape = (batch_size, p.context_size)
@@ -180,9 +201,30 @@ def test_get_batch():
         # check that all token integers are present in the tokenizer's mapping
         token_ints = set(batch_inputs.flatten().tolist())
         mapping_ints = set(p.tokenizer.int_to_token.keys())
-        other_ints = mapping_ints.difference(token_ints)
-        assert len(other_ints) != 0, 'Batch of input tokens contains '\
-            + 'integers outside of tokenizer\'s int to token mapping'
+        other_ints = token_ints.difference(mapping_ints)
+        assert len(other_ints) == 0, 'Batch of input tokens contains '\
+            + 'integers outside of tokenizer\'s int to token mapping: '\
+            + f'{other_ints}'
+
+        # check shape of batch of input masks
+        exp_shape = (batch_size, p.context_size)
+        act_shape = batch_input_masks.shape
+        assert exp_shape == act_shape, 'Incorrect shape of batch of input '\
+            + f'masks. Expected: {exp_shape}. Actual: {act_shape}'
+        
+        # check that all values in the input mask are either 0 or 1
+        mask_ints = set(batch_input_masks.flatten().tolist())
+        exp_ints = {0, 1}
+        other_ints = mask_ints.difference(exp_ints)
+        assert len(other_ints) == 0, 'Batch of input masks contains '\
+            + f'integers outside of {exp_ints}: {other_ints}'
+        
+        # check that mask is applied to all padding tokens
+        exp_batch_mask = (batch_inputs != p.tokenizer.token_to_int[
+            p.tokenizer.padding_token]).type(torch.int32)
+        assert torch.equal(exp_batch_mask, batch_input_masks), 'Incorrect '\
+            + f'batch of masks. Expected: {exp_batch_mask}. Actual: '\
+            + f'{batch_input_masks}'
 
         # check shape of batch of next tokens
         exp_shape = (batch_size,)

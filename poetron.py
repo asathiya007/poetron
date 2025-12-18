@@ -28,32 +28,40 @@ class PoetronTokenizer:
 
     def pad_or_truncate(self, tensor):
         '''
-        Args:
+        Input:
         tensor (torch.Tensor[int]) - a sequence of tokens to pad/truncate
 
-        Returns:
+        Output:
         new_tensor (torch.Tensor[int]) - the sequence of tokens that has
         either been padded (if length < self.max_length) or truncated (if
         length > self.max_length), with shape (self.max_length)
+        mask (torch.Tensor[int]) - mask on sequence of tokens (0 for tokens to
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (self.max_length)
         '''
         if len(tensor) < self.max_length:
             new_tensor = torch.cat(
                 [torch.ones(self.max_length - len(tensor))
-                    * self.token_to_int[self.padding_token], tensor])
+                    * self.token_to_int[self.padding_token], tensor],
+                dim=-1)
         elif len(tensor) > self.max_length:
             new_tensor = tensor[-self.max_length:]
-        return new_tensor.type(INT_DATA_TYPE)
+        new_tensor = new_tensor.type(INT_DATA_TYPE)
+        mask = (new_tensor != self.token_to_int[self.padding_token]).type(
+                INT_DATA_TYPE)
+        return new_tensor, mask
 
     def encode(self, inputs, pad_or_truncate=False):
         '''
-        Args:
+        Input:
         inputs (list[str]) - list of strings
         pad_or_truncate (bool) - boolean for whether to perform padding
         (if sequence of tokens is shorter than self.max_length) or truncation
         (if sequence of tokens is longer than self.max_length)
 
-        Returns:
+        Output:
         list of tokenized strings (list[torch.Tensor[int]])
+        list of masks (list[torch.Tensor[int]])
         '''
         # collect int tensors for each text input
         int_tensors = []
@@ -62,20 +70,22 @@ class PoetronTokenizer:
 
         # add integers corresponding to the padding token so
         # lengths of tensors all match, truncate if over max length
+        masks = []
         if pad_or_truncate:
             for i in range(len(int_tensors)):
-                int_tensors[i] = self.pad_or_truncate(int_tensors[i]).type(
-                    INT_DATA_TYPE)
+                int_tensor, mask = self.pad_or_truncate(int_tensors[i])
+                int_tensors[i] = int_tensor.type(INT_DATA_TYPE)
+                masks.append(mask.type(INT_DATA_TYPE))
 
-        # return tensors
-        return int_tensors
+        # return int tensors and masks
+        return int_tensors, masks
 
     def _encode(self, text):
         '''
-        Args:
+        Input:
         text (str) - a single string
 
-        Returns:
+        Output:
         tokenized string (torch.Tensor[int])
         '''
         # iterate through text, convert tokens to integers and return Tensor
@@ -99,10 +109,10 @@ class PoetronTokenizer:
 
     def decode(self, int_tensors):
         '''
-        Args:
+        Input:
         int_tensors (list[torch.Tensor[int]]) - tokenized strings
 
-        Returns:
+        Output:
         a list of strings, represented by the provided tokens (list(str))
         '''
         # decode each integer tensor, collect and return strings
@@ -113,10 +123,10 @@ class PoetronTokenizer:
 
     def _decode(self, ints):
         '''
-        Args:
+        Input:
         ints (torch.Tensor[int]) - a sequence of tokens
 
-        Returns:
+        Output:
         the string represented by the sequence of provided tokens (str)
         '''
         # convert tensor of integers to tokens, append to string
@@ -186,12 +196,14 @@ class Poetron:
     # utility function to get batch of training data for pretraining
     def _get_batch(self, batch_size):
         '''
-        Args:
+        Input:
         batch_size (int) - number of (tokens, next token) pairs to generate
         and return
 
-        Returns:
+        Output:
         batch_inputs - torch.Tensor[int], with shape (batch_size,
+        self.context_size)
+        batch_input_masks - torch.Tensor[int], with shape (batch_size,
         self.context_size)
         batch_next_tokens - torch.Tensor[int], with shape (batch_size)
         '''
@@ -199,11 +211,12 @@ class Poetron:
         idxs = random.choices(
             range(len(self.dataset_df)), k=batch_size)
         poems = self.dataset_df.iloc[idxs]['poem'].to_list()
-        tokenized_poems = self.tokenizer.encode(poems)
+        tokenized_poems, masks = self.tokenizer.encode(poems)
 
         # create inputs and next token pairs
         batch_inputs = []
         batch_next_tokens = []
+        batch_input_masks = []
         for tok_poem in tokenized_poems:
             # get slice of input tokens and the next token
             split_idx = random.choice(range(len(tok_poem) - 1))
@@ -211,21 +224,24 @@ class Poetron:
             next_token = tok_poem[split_idx + 1]
 
             # pad/truncate input tokens
-            input_tokens = self.tokenizer.pad_or_truncate(input_tokens)
+            input_tokens, mask = self.tokenizer.pad_or_truncate(input_tokens)
 
             # add to batch
             batch_inputs.append(input_tokens)
+            batch_input_masks.append(mask)
             batch_next_tokens.append(next_token)
 
         batch_inputs = torch.stack(batch_inputs, dim=0).type(INT_DATA_TYPE)
+        batch_input_masks = torch.stack(batch_input_masks, dim=0).type(
+            INT_DATA_TYPE)
         batch_next_tokens = torch.Tensor(batch_next_tokens).type(INT_DATA_TYPE)
 
         # return batch of samples
-        return batch_inputs, batch_next_tokens
+        return batch_inputs, batch_input_masks, batch_next_tokens
 
     def pretrain(self, batch_size, epochs=1000):
         '''
-        Args:
+        Input:
         batch_size (int) - size of each batch of input token sequences and
         their corresponding next tokens
         epochs (int) - number of pretraining epochs
@@ -235,7 +251,16 @@ class Poetron:
         self._get_tokenizer()
 
         # instantiate model
-        model = PoetronModel()
+        model = PoetronModel(
+            vocab_size=self.tokenizer.vocab_size,
+            embed_dim=256,
+            context_size=self.context_size,
+            num_attn_heads=4,
+            attn_head_size=32,
+            hidden_size=256,
+            num_hidden_layers=2,
+            num_attn_blocks=4
+        )
         model.train()
 
         # create optimizer
@@ -244,15 +269,16 @@ class Poetron:
         # pretrain model
         for _ in tqdm(range(epochs)):
             # get batch
-            batch_inputs, batch_next_tokens = self._get_batch(batch_size)
+            batch_inputs, batch_input_masks, batch_next_tokens = \
+                self._get_batch(batch_size)
 
-            # get predicted next token distributions
-            pred_next_token_dists = model(batch_inputs, batch_next_tokens,
-                                          self.tokenizer)
+            # get logits (enriched token embeddings, projected to vocab_size
+            # dimensions)
+            logits = model(batch_inputs, batch_input_masks)
 
             # calculate loss
             loss = nn.CrossEntropyLoss(
-                pred_next_token_dists, batch_next_tokens, reduction='mean')
+                logits, batch_next_tokens, reduction='mean')
 
             # backpropagate loss to update weights
             loss.backward()
