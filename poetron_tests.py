@@ -244,9 +244,8 @@ def test_get_init_attn_pattern():
         q, k, exp_attn_pattern = test_case
         attn_head_size = q.shape[2]
         context_size = q.shape[1]
-        input_mask = torch.ones((context_size,))
         sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, attn_head_size, context_size, input_mask)
+            PLACEHOLDER_EMBED_DIM, attn_head_size, context_size)
         act_attn_pattern = sah._get_init_attn_pattern(q, k)
         _check_attn_pattern(i + 1, exp_attn_pattern, act_attn_pattern)
 
@@ -286,10 +285,8 @@ def test_scale_attn_pattern():
         test_case = TEST_CASES[i]
         attn_pattern, scaling_factor, exp_scaled_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
-        input_mask = torch.ones((context_size,))
         sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
-            input_mask)
+            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
         act_scaled_attn_pattern = sah._scale_attn_pattern(
             attn_pattern, scaling_factor)
         _check_attn_pattern(
@@ -337,10 +334,8 @@ def test_apply_subseq_mask():
         test_case = TEST_CASES[i]
         attn_pattern, exp_masked_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
-        input_mask = torch.ones((context_size,))
         sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
-            input_mask)
+            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
         act_masked_attn_pattern = sah._apply_subseq_mask(attn_pattern)
         _check_attn_pattern(
             i + 1, exp_masked_attn_pattern, act_masked_attn_pattern)
@@ -408,20 +403,19 @@ def test_apply_input_mask():
         attn_pattern, input_mask, exp_masked_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
         sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
-            input_mask)
-        act_masked_attn_pattern = sah._apply_input_mask(attn_pattern)
+            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
+        act_masked_attn_pattern = sah._apply_input_mask(
+            attn_pattern, input_mask)
         _check_attn_pattern(
             i + 1, exp_masked_attn_pattern, act_masked_attn_pattern)
 
 
 def test_resolve_neg_inf_rows():
     TEST_CASES = [
-        # tuple(attention pattern, input mask, expected attention pattern after
-        # resolving rows with all -inf values)
+        # tuple(attention pattern, expected attention pattern after resolving
+        # rows with all -inf values)
         (
             torch.stack([torch.Tensor([[float('-inf')] * 5] * 5)] * 4, dim=0),
-            torch.stack([torch.Tensor([0] * 5)] * 4, dim=0),
             torch.stack([torch.Tensor(
                 [[float('-inf')] * i + [1] + [float('-inf')] * (4 - i)
                  for i in range(0, 5)]
@@ -433,7 +427,6 @@ def test_resolve_neg_inf_rows():
                 + [[float('-inf')] + [88] * i + [float('-inf')] * (3 - i)
                     for i in range(1, 4)]
             )] * 10, dim=0),
-            torch.stack([torch.Tensor([0, 1, 1, 1])] * 10, dim=0),
             torch.stack([torch.Tensor(
                 [[1] + [float('-inf')] * 3]
                 + [[float('-inf')] + [88] * i + [float('-inf')] * (3 - i)
@@ -444,7 +437,6 @@ def test_resolve_neg_inf_rows():
             torch.stack([torch.Tensor([
                 [4] * i + [float('-inf')] * (10 - i) for i in range(1, 11)
             ])], dim=0),
-            torch.stack([torch.Tensor([1] * 10)], dim=0),
             torch.stack([torch.Tensor([
                 [4] * i + [float('-inf')] * (10 - i) for i in range(1, 11)
             ])], dim=0)
@@ -462,9 +454,6 @@ def test_resolve_neg_inf_rows():
                         (2 - i) for i in range(1, 3)]
                 )] * 2, dim=0)
             ], dim=0),
-            torch.stack(
-                [torch.Tensor([0, 0, 1, 1, 1])] * 2
-                + [torch.Tensor([0, 0, 0, 1, 1])] * 2, dim=0),
             torch.cat([
                 torch.stack([torch.Tensor(
                     [[float('-inf')] * i + [1] + [float('-inf')] * (4 - i)
@@ -483,11 +472,10 @@ def test_resolve_neg_inf_rows():
     ]
     for i in range(len(TEST_CASES)):
         test_case = TEST_CASES[i]
-        attn_pattern, input_mask, exp_resolved_attn_pattern = test_case
+        attn_pattern, exp_resolved_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
         sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
-            input_mask)
+            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
         act_resolved_attn_pattern = sah._resolve_neg_inf_rows(attn_pattern)
         _check_attn_pattern(
             i + 1, exp_resolved_attn_pattern, act_resolved_attn_pattern)
@@ -495,14 +483,12 @@ def test_resolve_neg_inf_rows():
 
 def test_normalize_attn_pattern():
     TEST_CASES = [
-        # tuple(attention pattern, input mask, expected normalized attention
-        # pattern)
+        # tuple(attention pattern, expected normalized attention pattern)
         (
             torch.stack([torch.Tensor(
                 [[float('-inf')] * i + [1] + [float('-inf')] * (4 - i)
                     for i in range(0, 5)]
             )] * 4, dim=0),
-            torch.stack([torch.Tensor([0] * 5)] * 4, dim=0),
             torch.stack([torch.eye(5)] * 4)
         ),
         (
@@ -511,7 +497,6 @@ def test_normalize_attn_pattern():
                 + [[float('-inf')] + [88] * i + [float('-inf')] * (3 - i)
                     for i in range(1, 4)]
             )] * 10, dim=0),
-            torch.stack([torch.Tensor([0, 1, 1, 1])] * 10, dim=0),
             torch.stack([torch.Tensor(
                 [[1] + [0] * 3] +
                 [[0] + [1 / i] * i + [0] * (3 - i) for i in range(1, 4)])
@@ -521,7 +506,6 @@ def test_normalize_attn_pattern():
             torch.stack([torch.Tensor([
                 [4] * i + [float('-inf')] * (10 - i) for i in range(1, 11)
             ])], dim=0),
-            torch.stack([torch.Tensor([1] * 10)], dim=0),
             torch.stack([torch.Tensor([
                 [1 / i] * i + [0] * (10 - i) for i in range(1, 11)])
             ], dim=0)
@@ -541,9 +525,6 @@ def test_normalize_attn_pattern():
                         (2 - i) for i in range(1, 3)]
                 )] * 2, dim=0)
             ], dim=0),
-            torch.stack(
-                [torch.Tensor([0, 0, 1, 1, 1])] * 2
-                + [torch.Tensor([0, 0, 0, 1, 1])] * 2, dim=0),
             torch.cat([
                 torch.stack([torch.Tensor(
                     [[0] * i + [1] + [0] * (4 - i) for i in range(0, 2)]
@@ -560,11 +541,10 @@ def test_normalize_attn_pattern():
     ]
     for i in range(len(TEST_CASES)):
         test_case = TEST_CASES[i]
-        attn_pattern, input_mask, exp_normalized_attn_pattern = test_case
+        attn_pattern, exp_normalized_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
         sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size,
-            input_mask)
+            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
         act_normalized_attn_pattern = sah._normalize_attn_pattern(attn_pattern)
         _check_attn_pattern(
             i + 1, exp_normalized_attn_pattern, act_normalized_attn_pattern)
@@ -588,9 +568,9 @@ def test_self_attn_output_shape():
     for test_case in TEST_CASES:
         embed_dim, attn_head_size, context_size, batch_size = test_case
         input_mask = torch.stack([torch.ones(context_size)] * batch_size, dim=0)
-        sah = SelfAttnHead(embed_dim, attn_head_size, context_size, input_mask)
+        sah = SelfAttnHead(embed_dim, attn_head_size, context_size)
         sah_input = torch.randn((batch_size, context_size, embed_dim))
-        sah_output = sah(sah_input)
+        sah_output = sah(sah_input, input_mask)
         exp_output_shape = (batch_size, context_size, attn_head_size)
         act_output_shape = sah_output.shape
         _check_shape(exp_output_shape, act_output_shape)
@@ -610,9 +590,9 @@ def test_get_concat_sah_outputs():
             test_case
         input_mask = torch.stack([torch.ones(context_size)] * batch_size, dim=0)
         mha = MultiHeadAttn(
-            embed_dim, context_size, input_mask, num_attn_heads, attn_head_size)
+            embed_dim, context_size, num_attn_heads, attn_head_size)
         mha_input = torch.randn((batch_size, context_size, embed_dim))
-        concat_sah_outputs = mha._get_concat_sah_outputs(mha_input)
+        concat_sah_outputs = mha._get_concat_sah_outputs(mha_input, input_mask)
         exp_output_shape = (
             batch_size, context_size, attn_head_size * num_attn_heads)
         act_output_shape = concat_sah_outputs.shape
@@ -633,9 +613,9 @@ def test_multi_head_attn_output_shape():
             test_case
         input_mask = torch.ones((batch_size, context_size))
         mha = MultiHeadAttn(
-            embed_dim, context_size, input_mask, num_attn_heads, attn_head_size)
+            embed_dim, context_size, num_attn_heads, attn_head_size)
         mha_input = torch.randn((batch_size, context_size, embed_dim))
-        mha_output = mha(mha_input)
+        mha_output = mha(mha_input, input_mask)
         exp_output_shape = (
             batch_size, context_size, embed_dim)
         act_output_shape = mha_output.shape
@@ -674,12 +654,12 @@ def test_attn_block_output_shape():
         batch_size, embed_dim, context_size = test_case
         input_mask = torch.ones((batch_size, context_size))
         attn_block = AttnBlock(
-            embed_dim, context_size, input_mask, PLACEHOLDER_NUM_ATTN_HEADS,
+            embed_dim, context_size, PLACEHOLDER_NUM_ATTN_HEADS,
             PLACEHOLDER_ATTN_HEAD_SIZE, PLACEHOLDER_HIDDEN_SIZE,
             PLACEHOLDER_NUM_HIDDEN_LAYERS)
         attn_block_input = torch.randn((batch_size, context_size, embed_dim))
         exp_output_shape = (batch_size, context_size, embed_dim)
-        attn_block_output = attn_block(attn_block_input)
+        attn_block_output = attn_block(attn_block_input, input_mask)
         act_output_shape = attn_block_output.shape
         _check_shape(exp_output_shape, act_output_shape)
 
@@ -694,9 +674,8 @@ def test_sin_pos_embeds():
     ]
     for test_case in TEST_CASES:
         context_size, embed_dim = test_case
-        input_mask = torch.ones((1, context_size))
         pm = PoetronModel(
-            PLACEHOLDER_VOCAB_SIZE, embed_dim, context_size, input_mask,
+            PLACEHOLDER_VOCAB_SIZE, embed_dim, context_size,
             PLACEHOLDER_NUM_ATTN_HEADS, PLACEHOLDER_ATTN_HEAD_SIZE,
             PLACEHOLDER_HIDDEN_SIZE, PLACEHOLDER_NUM_HIDDEN_LAYERS,
             PLACEHOLDER_NUM_ATTN_BLOCKS)
@@ -731,11 +710,11 @@ def test_poetron_model_output_shape():
             low=0, high=vocab_size, size=(batch_size, context_size))
         exp_output_shape = (batch_size, context_size, vocab_size)
         pm = PoetronModel(
-            vocab_size, PLACEHOLDER_EMBED_DIM, context_size, input_mask,
+            vocab_size, PLACEHOLDER_EMBED_DIM, context_size,
             PLACEHOLDER_NUM_ATTN_HEADS, PLACEHOLDER_ATTN_HEAD_SIZE,
             PLACEHOLDER_HIDDEN_SIZE, PLACEHOLDER_NUM_HIDDEN_LAYERS,
             PLACEHOLDER_NUM_ATTN_BLOCKS)
-        pm_output = pm(pm_input)
+        pm_output = pm(pm_input, input_mask)
         act_output_shape = pm_output.shape
         _check_shape(exp_output_shape, act_output_shape)
 

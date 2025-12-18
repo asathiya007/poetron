@@ -4,22 +4,18 @@ import math
 
 
 class SelfAttnHead(nn.Module):
-    def __init__(self, embed_dim, attn_head_size, context_size, input_mask):
+    def __init__(self, embed_dim, attn_head_size, context_size):
         '''
         Input:
         embed_dim (int) - number of dimensions of token embedding
         attn_head_size (int) - number of dimensions of projection layer outputs
         as well as attention head output
         context_size (int) - number of tokens in a single input
-        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
-        ignore (like padding tokens), 1 for tokens to collect info from), shape
-        is (batch size, context size)
         '''
         super().__init__()
         self.embed_dim = embed_dim
         self.attn_head_size = attn_head_size
         self.context_size = context_size
-        self.input_mask = input_mask
 
         # lower triangular mask so tokens are not influenced by subsequent
         # tokens in the attention mechanism
@@ -69,7 +65,7 @@ class SelfAttnHead(nn.Module):
         '''
         return attn_pattern.masked_fill(self.attn_mask == 0, float('-inf'))
     
-    def _apply_input_mask(self, attn_pattern):
+    def _apply_input_mask(self, attn_pattern, input_mask):
         '''
         Input:
         attn_pattern (torch.Tensor[float]) - attention pattern, shape is
@@ -83,7 +79,7 @@ class SelfAttnHead(nn.Module):
         return attn_pattern.masked_fill(
             # extra dimension added at dimension index 1 for broadcasting
             # each input mask across the rows of the corresponding batch input
-            self.input_mask[:, None, :] == 0, float('-inf'))
+            input_mask[:, None, :] == 0, float('-inf'))
     
     def _resolve_neg_inf_rows(self, attn_pattern):
         '''
@@ -114,11 +110,14 @@ class SelfAttnHead(nn.Module):
         '''
         return torch.softmax(attn_pattern, dim=-1)
 
-    def forward(self, x):
+    def forward(self, x, input_mask):
         '''
         Input:
         x (torch.Tensor[float]) - token embeddings, shape is
         (batch size, context size, embed dim)
+        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (batch size, context size)
 
         Output:
         self-attention head output (torch.Tensor[float]) - information collected
@@ -146,7 +145,8 @@ class SelfAttnHead(nn.Module):
         # masked attention pattern (masking applied to subsequent tokens)
         masked_attn_pattern = self._apply_subseq_mask(scaled_attn_pattern)
         # masked attention pattern (input mask applied)
-        masked_attn_pattern = self._apply_input_mask(masked_attn_pattern)
+        masked_attn_pattern = self._apply_input_mask(
+            masked_attn_pattern, input_mask)
         # if any row of the attention pattern is all -infinity, set the value
         # where the row and column indices are equal to 1, so those token
         # embeddings are enriched using only info that corresponds to that token
@@ -167,15 +167,11 @@ class SelfAttnHead(nn.Module):
 
 
 class MultiHeadAttn(nn.Module):
-    def __init__(self, embed_dim, context_size, input_mask, num_attn_heads,
-                 attn_head_size):
+    def __init__(self, embed_dim, context_size, num_attn_heads, attn_head_size):
         '''
         Input:
         embed_dim (int) - number of dimensions of token embedding
         context_size (int) - number of tokens in a single input
-        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
-        ignore (like padding tokens), 1 for tokens to collect info from), shape
-        is (batch size, context size)
         num_attn_heads (int) - number of self-attention heads
         attn_head_size (int) - number of dimensions of projection layer outputs
         as well as attention head output
@@ -183,40 +179,44 @@ class MultiHeadAttn(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
         self.context_size = context_size
-        self.input_mask = input_mask
         self.num_attn_heads = num_attn_heads
         self.attn_head_size = attn_head_size
     
         # create attention heads
         self.attn_heads = nn.ModuleList([
-            SelfAttnHead(self.embed_dim, self.attn_head_size, self.context_size,
-                         self.input_mask)
+            SelfAttnHead(self.embed_dim, self.attn_head_size, self.context_size)
         ] * self.num_attn_heads)
 
         # output projection layer
         self.o_proj = nn.Linear(
             self.attn_head_size * self.num_attn_heads, self.embed_dim)
 
-    def _get_concat_sah_outputs(self, x):
+    def _get_concat_sah_outputs(self, x, input_mask):
         '''
         Input:
         x (torch.Tensor[float]) - tensor of token embeddings, shape is
         (batch size, context size, embed dim)
+        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (batch size, context size)
 
         Output:
         concatenated self-attention head outputs (torch.Tensor[float]) - tensor
         of concatentated self-attention head outputs, shape is 
         (batch size, context size, attn head size * num attn heads)
         '''
-        self_attn_head_outputs = [sah(x) for sah in self.attn_heads]
+        self_attn_head_outputs = [sah(x, input_mask) for sah in self.attn_heads]
         concat_sah_outputs = torch.cat(self_attn_head_outputs, dim=-1)
         return concat_sah_outputs
 
-    def forward(self, x):
+    def forward(self, x, input_mask):
         '''
         Input:
         x (torch.Tensor[float]) - tensor of token embeddings, shape is
         (batch size, context size, embed dim)
+        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (batch size, context size)
 
         Output:
         multi-head attention output - information collected across token
@@ -226,7 +226,7 @@ class MultiHeadAttn(nn.Module):
 
         # get information to enrich token embeddings from each self-attention
         # head
-        concat_sah_outputs = self._get_concat_sah_outputs(x)
+        concat_sah_outputs = self._get_concat_sah_outputs(x, input_mask)
 
         # project the concatenated self-attention head outputs to the embedding
         # space to get the multi-head attention output (information to enrich
@@ -286,15 +286,12 @@ class FeedFwd(nn.Module):
 
 
 class AttnBlock(nn.Module):
-    def __init__(self, embed_dim, context_size, input_mask, num_attn_heads,
-                 attn_head_size, hidden_size, num_hidden_layers):
+    def __init__(self, embed_dim, context_size, num_attn_heads, attn_head_size,
+                 hidden_size, num_hidden_layers):
         '''
         Input:
         embed_dim (int) - number of dimensions of token embedding
         context_size (int) - number of tokens in a single input
-        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
-        ignore (like padding tokens), 1 for tokens to collect info from), shape
-        is (batch size, context size)
         num_attn_heads (int) - number of self-attention heads
         attn_head_size (int) - number of dimensions of attention projection
         layer outputs as well as attention head output
@@ -305,7 +302,6 @@ class AttnBlock(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
         self.context_size = context_size
-        self.input_mask = input_mask
         self.num_attn_heads = num_attn_heads
         self.attn_head_size = attn_head_size
         self.hidden_size = hidden_size
@@ -313,8 +309,8 @@ class AttnBlock(nn.Module):
 
         # multi-head attention
         self.mah = MultiHeadAttn(
-            self.embed_dim, self.context_size, self.input_mask,
-            self.num_attn_heads, self.attn_head_size)
+            self.embed_dim, self.context_size, self.num_attn_heads,
+            self.attn_head_size)
 
         # layer normalization
         self.post_mah_layer_norm = nn.LayerNorm(self.embed_dim)
@@ -324,18 +320,21 @@ class AttnBlock(nn.Module):
         self.ffwd = FeedFwd(
             self.embed_dim, self.hidden_size, self.num_hidden_layers)
 
-    def forward(self, x):
+    def forward(self, x, input_mask):
         '''
         Input:
         x (torch.Tensor[float]) - tensor of token embeddings, shape is
         (batch size, context size, embed dim)
+        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (batch size, context size)
 
         Output:
         attention block output (torch.Tensor[float]) - tensor of enriched token
         embeddings, shape is (batch size, context size, embed dim)
         '''
         # enrich token embeddings with multi-head attention
-        x += self.mah(x)
+        x += self.mah(x, input_mask)
 
         # layer normalization
         x = self.post_mah_layer_norm(x)
@@ -354,16 +353,13 @@ class PoetronModel(nn.Module):
     '''
     A language model for generating/completing three-line poems
     '''
-    def __init__(self, vocab_size, embed_dim, context_size, input_mask,
-                 num_attn_heads, attn_head_size, hidden_size, num_hidden_layers,
+    def __init__(self, vocab_size, embed_dim, context_size, num_attn_heads,
+                 attn_head_size, hidden_size, num_hidden_layers,
                  num_attn_blocks):
         '''
         Input:
         embed_dim (int) - number of dimensions of token embedding
         context_size (int) - number of tokens in a single input
-        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
-        ignore (like padding tokens), 1 for tokens to collect info from), shape
-        is (batch size, context size)
         num_attn_heads (int) - number of self-attention heads per attention
         block
         attn_head_size (int) - number of dimensions of attention projection
@@ -377,7 +373,6 @@ class PoetronModel(nn.Module):
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_size = context_size
-        self.input_mask = input_mask
         self.num_attn_heads = num_attn_heads
         self.attn_head_size = attn_head_size
         self.hidden_size = hidden_size
@@ -391,11 +386,10 @@ class PoetronModel(nn.Module):
         self.sin_pos_embeds = self._get_sin_pos_embeds()
 
         # attention blocks
-        self.attn_blocks = nn.Sequential(*[
+        self.attn_blocks = nn.ModuleList([
             AttnBlock(
-                self.embed_dim, self.context_size, self.input_mask,
-                self.num_attn_heads, self.attn_head_size, self.hidden_size,
-                self.num_hidden_layers)
+                self.embed_dim, self.context_size, self.num_attn_heads,
+                self.attn_head_size, self.hidden_size, self.num_hidden_layers)
         ] * self.num_attn_blocks)
 
         # output projection layer
@@ -437,11 +431,14 @@ class PoetronModel(nn.Module):
         # return sinusoidal positional embeddings
         return sin_pos_embeds
 
-    def forward(self, x):
+    def forward(self, x, input_mask):
         '''
         Input:
         x (torch.Tensor[float]) - tensor of input tokens, shape is
         (batch size, context size)
+        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (batch size, context size)
 
         Output:
         transformer model output (torch.Tensor[float]) - tensor of logits
@@ -455,10 +452,11 @@ class PoetronModel(nn.Module):
 
         # enrich token embeddings with positional info (pre-computed sinusoidal
         # positional embeddings)
-        input_tok_embeds += self.sin_pos_embeds[None, :, :]
+        enriched_tok_embeds = input_tok_embeds + self.sin_pos_embeds[None, :, :]
 
         # enrich token embeddings through attention blocks
-        enriched_tok_embeds = self.attn_blocks(input_tok_embeds)
+        for attn_block in self.attn_blocks:
+            enriched_tok_embeds = attn_block(enriched_tok_embeds, input_mask)
 
         # project token embeddings from embed_dim dimensions to vocab_size
         # dimensions to get logits
