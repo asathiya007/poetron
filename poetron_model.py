@@ -431,6 +431,41 @@ class PoetronModel(nn.Module):
         # return sinusoidal positional embeddings
         return sin_pos_embeds
 
+    def _get_pos_embeds(self, input_mask):
+        '''
+        Input:
+        input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
+        ignore (like padding tokens), 1 for tokens to collect info from), shape
+        is (batch size, context size)
+        
+        Output:
+        positional embeddings (torch.Tensor[int]) - tensor of positional
+        embeddings (zero vectors for padding tokens at the start of the
+        sequence, sinusoidal positional embeddings for the rest of the tokens)
+        '''
+
+        # generate positional embeddings, using sinusoidal positional embedding
+        # (0s for padding tokens at the beginning of the sequence)
+        first_nonzero_idxs = torch.argmax(input_mask, dim=1).flatten().tolist()
+        pos_embeds = []
+        for i in range(len(first_nonzero_idxs)):
+            # do not include any positional info for masks of all 0s
+            if torch.equal(input_mask[i], torch.zeros(self.context_size)):
+                pos_embeds.append(
+                    torch.zeros(self.context_size, self.embed_dim))
+            # only include positional info after padding tokens at the start of
+            # the sequence
+            else:
+                num_starting_pad_toks = first_nonzero_idxs[i]
+                pos_embed = torch.cat([
+                    torch.zeros(num_starting_pad_toks, self.embed_dim),
+                    self.sin_pos_embeds[
+                        :self.context_size - num_starting_pad_toks]
+                ], dim=0)
+                pos_embeds.append(pos_embed)
+        pos_embeds = torch.stack(pos_embeds, dim=0)
+        return pos_embeds
+
     def forward(self, x, input_mask):
         '''
         Input:
@@ -450,9 +485,9 @@ class PoetronModel(nn.Module):
         # get input token embeddings
         input_tok_embeds = self.input_embed(x)
 
-        # enrich token embeddings with positional info (pre-computed sinusoidal
-        # positional embeddings)
-        enriched_tok_embeds = input_tok_embeds + self.sin_pos_embeds[None, :, :]
+        # enrich token embeddings with positional info
+        pos_embeds = self._get_pos_embeds(input_mask)
+        enriched_tok_embeds = input_tok_embeds + pos_embeds
 
         # enrich token embeddings through attention blocks
         for attn_block in self.attn_blocks:

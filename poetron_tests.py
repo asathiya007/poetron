@@ -737,6 +737,53 @@ def test_sin_pos_embeds():
                 + 'deterministically'
 
 
+def test_pos_embeds():
+    TEST_CASES = [
+        # tuple(context size, embed dim, number of zeros at the start of each
+        # sequence in the batch)
+        (100, 32, [10, 15, 20]),
+        (200, 64, [20, 30, 40, 50]),
+        (300, 128, [15, 30, 45, 60]),
+        (400, 256, [20, 30, 50]),
+        (100, 32, [0, 0, 10, 20]),
+        (200, 64, [20, 30, 0, 0])
+    ]
+    for test_case in TEST_CASES:
+        context_size, embed_dim, num_start_zeros_list = test_case
+        pm = PoetronModel(
+            PLACEHOLDER_VOCAB_SIZE, embed_dim, context_size,
+            PLACEHOLDER_NUM_ATTN_HEADS, PLACEHOLDER_ATTN_HEAD_SIZE,
+            PLACEHOLDER_HIDDEN_SIZE, PLACEHOLDER_NUM_HIDDEN_LAYERS,
+            PLACEHOLDER_NUM_ATTN_BLOCKS)
+        # create input mask
+        input_mask = []
+        for num_start_zeros in num_start_zeros_list:
+            input_mask.append(
+                [0] * num_start_zeros + [1] * (context_size - num_start_zeros))
+        input_mask = torch.Tensor(input_mask)
+        # get positional embeddings
+        pos_embeds = pm._get_pos_embeds(input_mask)
+        
+        # check shape of positional embeddings
+        exp_shape = (len(num_start_zeros_list), context_size, embed_dim)
+        act_shape = pos_embeds.shape
+        _check_shape(exp_shape, act_shape)
+
+        # check where 0s/sinusoidal positional embeddings are used
+        exp_pos_embeds = []
+        for num_start_zeros in num_start_zeros_list:
+            if num_start_zeros != 0:
+                zeros = torch.zeros(num_start_zeros, embed_dim)
+                sin_pos_embeds = pm.sin_pos_embeds[
+                    :context_size - num_start_zeros]
+                exp_pos_embeds.append(torch.cat([zeros, sin_pos_embeds], dim=0))
+            else:
+                exp_pos_embeds.append(pm.sin_pos_embeds)
+        exp_pos_embeds = torch.stack(exp_pos_embeds, dim=0)
+        assert torch.equal(pos_embeds, exp_pos_embeds), 'Incorrect positional '\
+            + f'embeddings. Expected: {exp_pos_embeds}. Actual: {pos_embeds}'
+
+
 def test_poetron_model_output_shape():
     TEST_CASES = [
         # tuple(batch size, context size, vocab size)
@@ -779,6 +826,7 @@ if __name__ == '__main__':
         test_feedfwd_output_shape,
         test_attn_block_output_shape,
         test_sin_pos_embeds,
+        test_pos_embeds,
         test_poetron_model_output_shape
     ]
     for test in tests:
