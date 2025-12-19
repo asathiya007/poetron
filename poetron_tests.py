@@ -138,11 +138,9 @@ def test_get_tokenizer():
         assert decoded_text == exp_texts, 'Incorrect decoding output. '\
             + f'Expected: {exp_texts}. Actual: {decoded_text}'
         
-        # check mask data types
-        for mask in masks:
-            assert mask.dtype is INT_DATA_TYPE, 'Incorrect data type '\
-                + f'for mask tensor. Expected: {INT_DATA_TYPE}. Actual: '\
-                + f'{mask.dtype}'
+        # check that returned masks is None
+        assert masks is None, 'Incorrect masks returned. Expected: None.'\
+            + f'Actual: {masks}'
 
     # check that batch of encoded inputs are padded to the max length
     int_tensors, masks = tokenizer.encode(
@@ -227,7 +225,7 @@ def test_get_batch():
             + f'{batch_input_masks}'
 
         # check shape of batch of next tokens
-        exp_shape = (batch_size,)
+        exp_shape = (batch_size, p.context_size)
         act_shape = batch_next_tokens.shape
         assert exp_shape == act_shape, 'Incorrect shape of batch of next '\
             + f'tokens. Expected: {exp_shape}. Actual: {act_shape}'
@@ -808,6 +806,93 @@ def test_poetron_model_output_shape():
         _check_shape(exp_output_shape, act_output_shape)
 
 
+def test_reshape_logits_and_next_toks():
+    TEST_CASES = [
+        # tuple (batch logits, batch input masks, batch next tokens,
+        # expected reshaped logits, expected reshaped next tokens)
+        (
+            torch.stack([
+                torch.ones((8, 10)), torch.ones((8, 10)) * 2,
+                torch.ones((8, 10)) * 4], dim=0),
+            torch.stack([
+                torch.Tensor([0, 0, 0, 1, 1, 1, 1, 1]),
+                torch.ones(8),
+                torch.zeros(8)
+            ], dim=0),
+            torch.Tensor([
+                [-1, -1, -1, 100, 200, 300, 400, 500],
+                [100, 200, 300, 400, 500, 600, 700, 800],
+                [-1, -1, -1, -1, -1, -1, -1, 100]
+            ]),
+            torch.cat([
+                torch.ones((5, 10)), torch.ones((8, 10)) * 2,
+                torch.ones((1, 10)) * 4], dim=0),
+            torch.Tensor([
+                100, 200, 300, 400, 500,
+                100, 200, 300, 400, 500, 600, 700, 800,
+                100
+            ])
+        ),
+        (
+            torch.stack([
+                torch.ones((8, 10)), torch.ones((8, 10)) * 2,
+                torch.ones((8, 10)) * 4], dim=0),
+            torch.stack([
+                torch.Tensor([0, 0, 0, 0, 1, 1, 1, 1]),
+                torch.Tensor([0, 0, 1, 1, 1, 1, 1, 1]),
+                torch.zeros(8)
+            ], dim=0),
+            torch.Tensor([
+                [-1, -1, -1, -1, 200, 300, 400, 500],
+                [-1, -1, 300, 400, 500, 600, 700, 800],
+                [-1, -1, -1, -1, -1, -1, -1, 100]
+            ]),
+            torch.cat([
+                torch.ones((4, 10)), torch.ones((6, 10)) * 2,
+                torch.ones((1, 10)) * 4], dim=0),
+            torch.Tensor([
+                200, 300, 400, 500,
+                300, 400, 500, 600, 700, 800,
+                100
+            ])
+        )
+    ]
+    for test_case in TEST_CASES:
+        batch_logits, batch_input_masks, batch_next_tokens, \
+            exp_reshaped_logits, exp_reshaped_next_tokens = test_case
+        
+        # create Poetron instance, get dataset and tokenizer
+        p = Poetron()
+        p._get_dataset()
+        p._get_tokenizer()
+
+        # update model class attributes
+        p.context_size = batch_logits.shape[1]
+
+        # if the padding token integer is used in the input, replace it
+        # with another integer
+        padding_token_int = p.tokenizer.token_to_int[p.padding_token]
+        batch_next_tokens[batch_next_tokens == padding_token_int] = \
+            padding_token_int + 20
+        exp_reshaped_next_tokens[
+            exp_reshaped_next_tokens == padding_token_int] = \
+                padding_token_int + 20
+        # replace -1's with padding token integer
+        batch_next_tokens[batch_next_tokens == -1] = -1
+
+        # get reshaped logits and next tokens
+        reshaped_logits, reshaped_next_tokens = p._reshape_logits_and_next_toks(
+            batch_logits, batch_input_masks, batch_next_tokens)
+
+        # check reshaped logits and next tokens
+        assert torch.equal(exp_reshaped_logits, reshaped_logits), 'Incorrect '\
+            + f'reshaped logits. Expected: {exp_reshaped_logits}. Actual: '\
+            + f'{reshaped_logits}'
+        assert torch.equal(exp_reshaped_next_tokens, reshaped_next_tokens), \
+            + f'Incorrect reshaped next tokens. Expected: '\
+            + f'{exp_reshaped_next_tokens}. Actual: {reshaped_next_tokens}'
+
+
 if __name__ == '__main__':
     # run tests
     tests = [
@@ -827,7 +912,8 @@ if __name__ == '__main__':
         test_attn_block_output_shape,
         test_sin_pos_embeds,
         test_pos_embeds,
-        test_poetron_model_output_shape
+        test_poetron_model_output_shape,
+        test_reshape_logits_and_next_toks
     ]
     for test in tests:
         test()

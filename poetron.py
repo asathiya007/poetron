@@ -61,17 +61,18 @@ class PoetronTokenizer:
 
         Output:
         list of tokenized strings (list[torch.Tensor[int]])
-        list of masks (list[torch.Tensor[int]])
+        list of masks (None or list[torch.Tensor[int]])
         '''
         # collect int tensors for each text input
         int_tensors = []
         for text in inputs:
             int_tensors.append(self._encode(text))
+        masks = None
 
         # add integers corresponding to the padding token so
         # lengths of tensors all match, truncate if over max length
-        masks = []
         if pad_or_truncate:
+            masks = []
             for i in range(len(int_tensors)):
                 int_tensor, mask = self.pad_or_truncate(int_tensors[i])
                 int_tensors[i] = int_tensor.type(INT_DATA_TYPE)
@@ -152,7 +153,7 @@ class Poetron:
             self.poem_end_token]
 
         # set context size
-        self.context_size = 240
+        self.context_size = 400
 
     def _get_dataset(self):
         # download three line poem dataset, remove rows with missing values
@@ -205,41 +206,87 @@ class Poetron:
         self.context_size)
         batch_input_masks - torch.Tensor[int], with shape (batch_size,
         self.context_size)
-        batch_next_tokens - torch.Tensor[int], with shape (batch_size)
+        batch_next_tokens - torch.Tensor[int], with shape (batch_size,
+        self.context_size)
         '''
         # sample poems
         idxs = random.choices(
             range(len(self.dataset_df)), k=batch_size)
         poems = self.dataset_df.iloc[idxs]['poem'].to_list()
-        tokenized_poems, masks = self.tokenizer.encode(poems)
+        tokenized_poems, _ = self.tokenizer.encode(poems)
 
         # create inputs and next token pairs
         batch_inputs = []
         batch_next_tokens = []
         batch_input_masks = []
         for tok_poem in tokenized_poems:
-            # get slice of input tokens and the next token
-            split_idx = random.choice(range(len(tok_poem) - 1))
-            input_tokens = tok_poem[:split_idx + 1]
-            next_token = tok_poem[split_idx + 1]
+            # get input tokens and the corresponding next tokens
+            input_tokens = tok_poem[:-1]
+            next_tokens = tok_poem[1:]
 
-            # pad/truncate input tokens
+            # pad/truncate input tokens and next tokens
             input_tokens, mask = self.tokenizer.pad_or_truncate(input_tokens)
+            next_tokens, _ = self.tokenizer.pad_or_truncate(next_tokens)
 
             # add to batch
             batch_inputs.append(input_tokens)
             batch_input_masks.append(mask)
-            batch_next_tokens.append(next_token)
+            batch_next_tokens.append(next_tokens)
 
         batch_inputs = torch.stack(batch_inputs, dim=0).type(INT_DATA_TYPE)
         batch_input_masks = torch.stack(batch_input_masks, dim=0).type(
             INT_DATA_TYPE)
-        batch_next_tokens = torch.Tensor(batch_next_tokens).type(INT_DATA_TYPE)
+        batch_next_tokens = torch.stack(batch_next_tokens, dim=0).type(
+            INT_DATA_TYPE)
 
         # return batch of samples
         return batch_inputs, batch_input_masks, batch_next_tokens
 
-    def pretrain(self, batch_size, epochs=1000):
+    def _reshape_logits_and_next_toks(
+            self, batch_logits, batch_input_masks, batch_next_tokens):
+        '''
+        Input:
+        batch_logits (torch.Tensor[float]) - logits obtained from forward pass
+        through model, shape is (batch size, context size, vocab size)
+        batch_input_mask (torch.Tensor[int]) - input masks for each batch item,
+        shape is (batch size, context size, vocab size)
+        batch_next_tokens (torch.Tensor[int]) - next tokens of the batch,
+        shape is (batch size, context size)
+
+        Output:
+        reshaped_logits (torch.Tensor[float]) - reshaped logits, shape is
+        (at most batch size * context size, vocab size)
+        reshaped_next_tokens (torch.Tensor[float]) - reshaped next tokens, shape
+        is (at most batch size * context size)
+        '''
+
+        # reshape logits and next tokens to get more training samples
+        reshaped_logits = []
+        reshaped_next_tokens = []
+        for i in range(batch_logits.shape[0]):
+            input_mask = batch_input_masks[i]
+            logits = batch_logits[i]
+            next_tokens = batch_next_tokens[i]
+
+            # if input mask is all zeros, only take the logits/next token
+            # corresponding to the final token
+            if torch.equal(input_mask, torch.zeros(self.context_size)):
+                reshaped_logits.append(logits[-1:])
+                reshaped_next_tokens.append(next_tokens[-1:])
+            # otherwise, take logits/next tokens for all tokens except the
+            # padding tokens at the start of the sequence
+            else:
+                first_nonzero_idx = torch.argmax(input_mask)
+                reshaped_logits.append(logits[first_nonzero_idx:])
+                reshaped_next_tokens.append(
+                    next_tokens[first_nonzero_idx:])
+        reshaped_logits = torch.cat(reshaped_logits, dim=0)
+        reshaped_next_tokens = torch.cat(reshaped_next_tokens, dim=0)
+
+        # return reshaped logits and next tokens
+        return reshaped_logits, reshaped_next_tokens
+
+    def pretrain(self, batch_size, epochs=1000, lr=1e-3):
         '''
         Input:
         batch_size (int) - size of each batch of input token sequences and
@@ -264,7 +311,7 @@ class Poetron:
         model.train()
 
         # create optimizer
-        optimizer = AdamW()
+        optimizer = AdamW(model.parameters(), lr=lr)
 
         # pretrain model
         for _ in tqdm(range(epochs)):
@@ -274,14 +321,26 @@ class Poetron:
 
             # get logits (enriched token embeddings, projected to vocab_size
             # dimensions)
-            logits = model(batch_inputs, batch_input_masks)
+            batch_logits = model(batch_inputs, batch_input_masks)
 
+            # reshape logits to get more training examples
+            reshaped_logits, reshaped_next_tokens = \
+                self._reshape_logits_and_next_toks(
+                    batch_logits, batch_next_tokens)
+
+            # TODO: check that loss is calculated properly
             # calculate loss
             loss = nn.CrossEntropyLoss(
-                logits, batch_next_tokens, reduction='mean')
+                reshaped_logits, reshaped_next_tokens, reduction='mean')
 
             # backpropagate loss to update weights
             loss.backward()
             optimizer.step()
+
+            # TODO: after a certain number of epochs, print loss and generate
+            # a short poem (use the generate method)
+
         model.eval()
         self.model = model
+
+    # TODO: implement generate method
