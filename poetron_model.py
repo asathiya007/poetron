@@ -334,13 +334,13 @@ class AttnBlock(nn.Module):
         embeddings, shape is (batch size, context size, embed dim)
         '''
         # enrich token embeddings with multi-head attention
-        x += self.mah(x, input_mask)
+        x = x + self.mah(x, input_mask)
 
         # layer normalization
         x = self.post_mah_layer_norm(x)
 
         # enrich token embeddings with feed forward network
-        x += self.ffwd(x)
+        x = x + self.ffwd(x)
 
         # layer normalization
         x = self.post_ffwd_layer_norm(x)
@@ -355,7 +355,7 @@ class PoetronModel(nn.Module):
     '''
     def __init__(self, vocab_size, embed_dim, context_size, num_attn_heads,
                  attn_head_size, hidden_size, num_hidden_layers,
-                 num_attn_blocks):
+                 num_attn_blocks, device):
         '''
         Input:
         embed_dim (int) - number of dimensions of token embedding
@@ -368,6 +368,7 @@ class PoetronModel(nn.Module):
         attention block
         num_hidden_layers (int) - number of hidden layers in the feed-forward
         network of each attention block
+        device (torch.device) - the device that the model is running on
         '''
         super().__init__()
         self.vocab_size = vocab_size
@@ -378,6 +379,7 @@ class PoetronModel(nn.Module):
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
         self.num_attn_blocks = num_attn_blocks
+        self.device = device
 
         # input token embedding matrix
         self.input_embed = nn.Embedding(self.vocab_size, self.embed_dim)
@@ -450,7 +452,8 @@ class PoetronModel(nn.Module):
         pos_embeds = []
         for i in range(len(first_nonzero_idxs)):
             # do not include any positional info for masks of all 0s
-            if torch.equal(input_mask[i], torch.zeros(self.context_size)):
+            if torch.equal(input_mask[i], torch.zeros(
+                    self.context_size, device=self.device)):
                 pos_embeds.append(
                     torch.zeros(self.context_size, self.embed_dim))
             # only include positional info after padding tokens at the start of
@@ -486,7 +489,7 @@ class PoetronModel(nn.Module):
         input_tok_embeds = self.input_embed(x)
 
         # enrich token embeddings with positional info
-        pos_embeds = self._get_pos_embeds(input_mask)
+        pos_embeds = self._get_pos_embeds(input_mask).to(self.device)
         enriched_tok_embeds = input_tok_embeds + pos_embeds
 
         # enrich token embeddings through attention blocks
