@@ -12,6 +12,7 @@ PLACEHOLDER_HIDDEN_SIZE = 256
 PLACEHOLDER_NUM_HIDDEN_LAYERS = 2
 PLACEHOLDER_NUM_ATTN_BLOCKS = 8
 PLACEHOLDER_VOCAB_SIZE = 300
+DEVICE = torch.device('cpu')
 
 
 def test_get_dataset():
@@ -114,9 +115,9 @@ def test_get_tokenizer():
     # check number of tokens as well
     texts = [
         # tuple(text, expected number of tokens)
-        ('The quick brown fox jumped over the lazy dog.', 45),
-        ('What a great song that was! What is it called?', 46),
-        ('<padding><padding><poem_start>Testing<line_end>Testing<line_end>'
+        ('the quick brown fox jumped over the lazy dog.', 45),
+        ('what a great song that was! what is it called?', 46),
+        ('<padding><padding><poem_start>testing<line_end>testing<line_end>'
          + '<poem_end>', 20)
     ]
     for text, exp_num_tokens in texts:
@@ -718,7 +719,7 @@ def test_sin_pos_embeds():
             PLACEHOLDER_VOCAB_SIZE, embed_dim, context_size,
             PLACEHOLDER_NUM_ATTN_HEADS, PLACEHOLDER_ATTN_HEAD_SIZE,
             PLACEHOLDER_HIDDEN_SIZE, PLACEHOLDER_NUM_HIDDEN_LAYERS,
-            PLACEHOLDER_NUM_ATTN_BLOCKS)
+            PLACEHOLDER_NUM_ATTN_BLOCKS, DEVICE)
 
         # check sinusoidal positional embedding shape
         spe = pm.sin_pos_embeds
@@ -752,7 +753,7 @@ def test_pos_embeds():
             PLACEHOLDER_VOCAB_SIZE, embed_dim, context_size,
             PLACEHOLDER_NUM_ATTN_HEADS, PLACEHOLDER_ATTN_HEAD_SIZE,
             PLACEHOLDER_HIDDEN_SIZE, PLACEHOLDER_NUM_HIDDEN_LAYERS,
-            PLACEHOLDER_NUM_ATTN_BLOCKS)
+            PLACEHOLDER_NUM_ATTN_BLOCKS, DEVICE)
         # create input mask
         input_mask = []
         for num_start_zeros in num_start_zeros_list:
@@ -800,7 +801,7 @@ def test_poetron_model_output_shape():
             vocab_size, PLACEHOLDER_EMBED_DIM, context_size,
             PLACEHOLDER_NUM_ATTN_HEADS, PLACEHOLDER_ATTN_HEAD_SIZE,
             PLACEHOLDER_HIDDEN_SIZE, PLACEHOLDER_NUM_HIDDEN_LAYERS,
-            PLACEHOLDER_NUM_ATTN_BLOCKS)
+            PLACEHOLDER_NUM_ATTN_BLOCKS, DEVICE)
         pm_output = pm(pm_input, input_mask)
         act_output_shape = pm_output.shape
         _check_shape(exp_output_shape, act_output_shape)
@@ -863,6 +864,7 @@ def test_reshape_logits_and_next_toks():
         
         # create Poetron instance, get dataset and tokenizer
         p = Poetron()
+        p.device = DEVICE
         p._get_dataset()
         p._get_tokenizer()
 

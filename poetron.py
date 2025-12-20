@@ -15,7 +15,7 @@ INT_DATA_TYPE = torch.int32
 
 class PoetronTokenizer:
     '''
-    Tokenizer for the Poetron foundation language model.
+    Tokenizer for the Poetron language model.
     '''
     def __init__(self, special_tokens, padding_token, token_to_int,
                  int_to_token, max_length):
@@ -140,7 +140,8 @@ class PoetronTokenizer:
 
 class Poetron:
     '''
-    A system that uses a language model to generate/complete three-line poems
+    A system that uses a custom generative pretrained transformer (GPT)
+    language model to generate/complete short poems
     '''
     def __init__(self):
         # specify special tokens
@@ -170,9 +171,10 @@ class Poetron:
         dataset_df = dataset_df.dropna().reset_index(drop=True)
 
         # consolidate columns to get full poem, with special tokens
-        dataset_df['poem'] = self.poem_start_token + dataset_df['0']\
-            + self.line_end_token + dataset_df['1'] + self.line_end_token\
-            + dataset_df['2'] + self.poem_end_token
+        dataset_df['poem'] = self.poem_start_token\
+            + dataset_df['0'].str.strip().str.lower() + self.line_end_token\
+            + dataset_df['1'].str.strip().str.lower() + self.line_end_token\
+            + dataset_df['2'].str.strip().str.lower() + self.poem_end_token
         self.dataset_df = dataset_df[['poem']].reset_index(drop=True)
 
     def _get_tokenizer(self):
@@ -309,12 +311,12 @@ class Poetron:
         # instantiate model
         self.model = PoetronModel(
             vocab_size=self.tokenizer.vocab_size,
-            embed_dim=256,
+            embed_dim=64,
             context_size=self.context_size,
             num_attn_heads=4,
-            attn_head_size=32,
-            hidden_size=256,
-            num_hidden_layers=2,
+            attn_head_size=16,
+            hidden_size=64,
+            num_hidden_layers=1,
             num_attn_blocks=4,
             device=self.device
         ).to(self.device)
@@ -356,14 +358,14 @@ class Poetron:
             # after a certain number of epochs, print loss and generate
             # a short poem (use the generate method)
             if (epoch + 1) % log_iters == 0:
-                print(f'Average loss in epoch {epoch + 1}: {loss.item()}')
-                sample_poem = self.generate([''], self.context_size - 1)[0]
-                sample_poem = sample_poem.replace(self.padding_token, '')
-                print(f'Sample poem: {sample_poem}')
+                sample_poem = self.generate([''], self.context_size - 1,
+                                            postprocess=True)[0]
+                print(f'Average loss in epoch {epoch + 1}: {loss.item()}.\n'
+                       +f'Sample Poem:\n{sample_poem}')
         self.model.eval()
 
     @torch.no_grad()
-    def generate(self, input_texts, max_new_tokens):
+    def generate(self, input_texts, max_new_tokens, postprocess=False):
         '''
         Input:
         input_texts (list[str]) - list of input poem texts to complete
@@ -420,4 +422,16 @@ class Poetron:
         for i in range(tokenized_inputs.shape[0]):
             int_tensors.append(tokenized_inputs[i])
         generated_texts = self.tokenizer.decode(int_tensors)
+
+        # postprocess generated texts
+        if postprocess:
+            generated_texts = list(map(
+                lambda t:
+                t[t.find(self.poem_start_token) : t.find(self.poem_end_token)]\
+                    .replace(self.padding_token, '')\
+                    .replace(self.poem_start_token, '')\
+                    .replace(self.poem_end_token, '')\
+                    .replace(self.line_end_token, '\n'), generated_texts))
+
+        # return texts
         return generated_texts
