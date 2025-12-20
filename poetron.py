@@ -18,13 +18,14 @@ class PoetronTokenizer:
     Tokenizer for the Poetron language model.
     '''
     def __init__(self, special_tokens, padding_token, token_to_int,
-                 int_to_token, max_length):
+                 int_to_token, max_length, non_alnum_chars):
         self.special_tokens = special_tokens
         self.padding_token = padding_token
         self.token_to_int = token_to_int
         self.int_to_token = int_to_token
         self.vocab_size = len(self.token_to_int.keys())
         self.max_length = max_length
+        self.non_alnum_chars = non_alnum_chars
 
     def pad_or_truncate(self, tensor):
         '''
@@ -100,10 +101,40 @@ class PoetronTokenizer:
                     ints.append(self.token_to_int[special_token])
                     idx += len(special_token)
                     found_special_token = True
+                    break
             if found_special_token:
                 continue
 
-            # if not special token, proceed with character-level tokenization
+            # check for word token
+            # first, find the earliest word separator (could be special token
+            # or non-alphanumeric character)
+            first_word_separator = None
+            first_word_separator_idx = None
+            word_separators = list(set(self.special_tokens).union(
+                self.non_alnum_chars))
+            for word_separator in word_separators:
+                word_separator_idx = text[idx:].find(word_separator)
+                if word_separator_idx != -1:
+                    if first_word_separator is None or\
+                            first_word_separator_idx > word_separator_idx:
+                        first_word_separator = word_separator
+                        first_word_separator_idx = word_separator_idx
+            # extract word token
+            word_token = None
+            if first_word_separator is None:
+                word_token = text[idx:]
+            elif first_word_separator_idx != 0:
+                word_token = text[idx:idx + first_word_separator_idx]
+            # add corresponding integer to sequence if word token is present in
+            # vocabulary
+            if word_token is not None and\
+                    word_token in self.token_to_int.keys():
+                ints.append(self.token_to_int[word_token])
+                idx += len(word_token)
+                continue
+
+            # if not special token or word token, proceed with character-level
+            # tokenization
             ints.append(self.token_to_int[text[idx]])
             idx += 1
         return torch.Tensor(ints).type(INT_DATA_TYPE)
@@ -178,31 +209,44 @@ class Poetron:
         self.dataset_df = dataset_df[['poem']].reset_index(drop=True)
 
     def _get_tokenizer(self):
-        # get characters in dataset (ignoring special tokens) for
-        # character-based tokenization
+        # get character tokens from dataset (ignoring special tokens)
         chars = set()
         for i in range(len(self.dataset_df['poem'])):
             poem = self.dataset_df['poem'][i]
             for special_token in self.special_tokens:
                 poem = poem.replace(special_token, '')
             chars = chars.union(set(poem))
-        chars = sorted(chars)
+        
+        # split poems on non-alphanumeric tokens (ignoring special tokens)
+        # to get word tokens
+        words = set()
+        non_alnum_chars = set(filter(lambda c: not c.isalnum(), chars))
+        for i in range(len(self.dataset_df['poem'])):
+            poem = self.dataset_df['poem'][i]
+            for special_token in self.special_tokens:
+                poem = poem.replace(special_token, ' ')
+            for non_alnum_char in non_alnum_chars:
+                poem = poem.replace(non_alnum_char, ' ')
+            words = words.union(set(poem.split(' ')))
 
-        # map character tokens to integers, and vice versa
-        ints = list(range(len(chars)))
-        token_to_int = {char: int for char, int in zip(chars, ints)}
-        int_to_token = {int: char for int, char in zip(ints, chars)}
+        # combine sets of word and character tokens
+        tokens = sorted(chars.union(words))
+
+        # map tokens to integers, and vice versa
+        ints = list(range(len(tokens)))
+        token_to_int = {token: int for token, int in zip(tokens, ints)}
+        int_to_token = {int: token for int, token in zip(ints, tokens)}
 
         # map special tokens to integers
         for i in range(len(self.special_tokens)):
             special_token = self.special_tokens[i]
-            token_to_int[special_token] = len(chars) + i
-            int_to_token[len(chars) + i] = special_token
+            token_to_int[special_token] = len(tokens) + i
+            int_to_token[len(tokens) + i] = special_token
 
         # create tokenizer
         self.tokenizer = PoetronTokenizer(
             self.special_tokens, self.padding_token, token_to_int,
-            int_to_token, self.context_size)
+            int_to_token, self.context_size, non_alnum_chars)
 
     # utility function to get batch of training data for pretraining
     def _get_batch(self, batch_size):

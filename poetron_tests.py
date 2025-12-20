@@ -115,10 +115,10 @@ def test_get_tokenizer():
     # check number of tokens as well
     texts = [
         # tuple(text, expected number of tokens)
-        ('the quick brown fox jumped over the lazy dog.', 45),
-        ('what a great song that was! what is it called?', 46),
-        ('<padding><padding><poem_start>testing<line_end>testing<line_end>'
-         + '<poem_end>', 20)
+        ('a long path between the leaves', 11),
+        ('the morning sun on summer break', 11),
+        ('<padding><padding><poem_start>forest<line_end>beach xyz<line_end>'
+         + '<poem_end>', 12)
     ]
     for text, exp_num_tokens in texts:
         int_tensors, masks = tokenizer.encode([text])
