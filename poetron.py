@@ -297,7 +297,7 @@ class Poetron:
         # return reshaped logits and next tokens
         return reshaped_logits, reshaped_next_tokens
 
-    def pretrain(self, batch_size, epochs=1000, lr=1e-3, log_iters=100):
+    def pretrain(self, batch_size, iters=1000, lr=1e-3, log_iters=100):
         '''
         Input:
         batch_size (int) - size of each batch of input token sequences and
@@ -314,10 +314,10 @@ class Poetron:
             embed_dim=64,
             context_size=self.context_size,
             num_attn_heads=4,
-            attn_head_size=16,
-            hidden_size=64,
-            num_hidden_layers=1,
-            num_attn_blocks=4,
+            attn_head_size=32,
+            hidden_size=128,
+            num_hidden_layers=2,
+            num_attn_blocks=6,
             device=self.device
         ).to(self.device)
         self.model.train()
@@ -326,7 +326,7 @@ class Poetron:
         optimizer = AdamW(self.model.parameters(), lr=lr)
 
         # pretrain model
-        for epoch in tqdm(range(epochs)):
+        for iter in tqdm(range(iters)):
             # reset gradients
             optimizer.zero_grad()
 
@@ -355,13 +355,13 @@ class Poetron:
             loss.backward()
             optimizer.step()
 
-            # after a certain number of epochs, print loss and generate
+            # after a certain number of iterations, print loss and generate
             # a short poem (use the generate method)
-            if (epoch + 1) % log_iters == 0:
+            if (iter + 1) % log_iters == 0:
                 sample_poem = self.generate([''], self.context_size - 1,
                                             postprocess=True)[0]
-                print(f'Average loss in epoch {epoch + 1}: {loss.item()}.\n'
-                       +f'Sample Poem:\n{sample_poem}')
+                print(f'Average loss across batch in iteration {iter + 1}: '
+                       +f'{loss.item()}.\nSample Poem:\n{sample_poem}')
         self.model.eval()
 
     @torch.no_grad()
