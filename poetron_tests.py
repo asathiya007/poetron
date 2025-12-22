@@ -334,7 +334,7 @@ def test_scale_attn_pattern():
             i + 1, exp_scaled_attn_pattern, act_scaled_attn_pattern)
 
 
-def test_apply_subseq_mask():
+def test_apply_causal_mask():
     TEST_CASES = [
         # tuple(attention pattern, expected attention pattern after masking
         # subsequent tokens)
@@ -377,7 +377,7 @@ def test_apply_subseq_mask():
         context_size = attn_pattern.shape[1]
         sah = SelfAttnHead(
             PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
-        act_masked_attn_pattern = sah._apply_subseq_mask(attn_pattern)
+        act_masked_attn_pattern = sah._apply_causal_mask(attn_pattern)
         _check_attn_pattern(
             i + 1, exp_masked_attn_pattern, act_masked_attn_pattern)
 
@@ -903,7 +903,7 @@ if __name__ == '__main__':
         test_get_batch,
         test_get_init_attn_pattern,
         test_scale_attn_pattern,
-        test_apply_subseq_mask,
+        test_apply_causal_mask,
         test_apply_input_mask,
         test_resolve_neg_inf_rows,
         test_normalize_attn_pattern,

@@ -1,8 +1,11 @@
 import kagglehub
+import logging
 import os
 import pandas as pd
+import pickle
 from poetron_model import PoetronModel
 import random
+import sys
 import torch
 import torch.nn.functional as F
 from torch.optim import AdamW
@@ -11,6 +14,9 @@ from tqdm import tqdm
 
 # set integer data type
 INT_DATA_TYPE = torch.int32
+
+# set default save/load directory
+DEFAULT_SAVE_DIR = './poetron_save_dir'
 
 
 class PoetronTokenizer:
@@ -185,7 +191,7 @@ class Poetron:
             self.poem_end_token]
 
         # set context size
-        self.context_size = 400
+        self.context_size = 200
 
         # set device
         if torch.cuda.is_available():
@@ -195,20 +201,39 @@ class Poetron:
         else:
             self.device = torch.device('cpu')
 
-    def _get_dataset(self):
-        # download three line poem dataset, remove rows with missing values
-        path = kagglehub.dataset_download('hjhalani30/haiku-dataset')
-        dataset_df = pd.read_csv(os.path.join(path, 'all_haiku.csv'))
-        dataset_df = dataset_df.dropna().reset_index(drop=True)
+        # get logger
+        self.logger = logging.getLogger('Poetron_Logger')
+        self.logger.setLevel(logging.INFO)
+        logging.basicConfig(stream=sys.stdout)
 
-        # consolidate columns to get full poem, with special tokens
-        dataset_df['poem'] = self.poem_start_token\
-            + dataset_df['0'].str.strip().str.lower() + self.line_end_token\
-            + dataset_df['1'].str.strip().str.lower() + self.line_end_token\
-            + dataset_df['2'].str.strip().str.lower() + self.poem_end_token
-        self.dataset_df = dataset_df[['poem']].reset_index(drop=True)
+    def _get_dataset(self):
+        self.logger.info('Downloading and processing dataset...')
+
+        # download dataset and process poems
+        path = kagglehub.dataset_download('bfbarry/haiku-dataset')
+        poems_dataset = []
+        with open(os.path.join(path, 'lines.txt'), 'r') as poems_file:
+            for poem in poems_file:
+                proc_poem = poem.lower().replace('$', '')
+                proc_poem_lines = proc_poem.split('/')
+                empty_line_present = False
+                for i in range(len(proc_poem_lines)):
+                    proc_poem_lines[i] = proc_poem_lines[i].strip()
+                    if len(proc_poem_lines[i]) == 0:
+                        empty_line_present = True
+                        break
+                if empty_line_present:
+                    continue
+                proc_poem = self.poem_start_token\
+                    + self.line_end_token.join(proc_poem_lines)\
+                    + self.poem_end_token
+                poems_dataset.append(proc_poem)
+        self.dataset_df = pd.DataFrame({'poem': poems_dataset})
+        self.logger.info('Downloaded and processed dataset')
 
     def _get_tokenizer(self):
+        self.logger.info('Creating tokenizer...')
+
         # get character tokens from dataset (ignoring special tokens)
         chars = set()
         for i in range(len(self.dataset_df['poem'])):
@@ -247,25 +272,33 @@ class Poetron:
         self.tokenizer = PoetronTokenizer(
             self.special_tokens, self.padding_token, token_to_int,
             int_to_token, self.context_size, non_alnum_chars)
+        self.logger.info('Created tokenizer')
 
     # utility function to get batch of training data for pretraining
-    def _get_batch(self, batch_size):
+    def _get_batch(self, batch_size, start_idx=None):
         '''
         Input:
         batch_size (int) - number of (tokens, next token) pairs to generate
         and return
+        start_idx (int or None) - the starting index of the batch (if None,
+        random indices are used)
 
         Output:
-        batch_inputs - torch.Tensor[int], with shape (batch_size,
-        self.context_size)
-        batch_input_masks - torch.Tensor[int], with shape (batch_size,
-        self.context_size)
-        batch_next_tokens - torch.Tensor[int], with shape (batch_size,
-        self.context_size)
+        batch_inputs (torch.Tensor[int]) - tensor of input tokens, shape is
+        (batch size, context size)
+        batch_input_masks (torch.Tensor[int]) - tensor of input masks, shape
+        is (batch size, context size)
+        batch_next_tokens (torch.Tensor[int]) - tensor of next tokens for
+        every contiguous subsequence of tokens in batch_inputs, shape is
+        (batch size, context size)
         '''
         # sample poems
-        idxs = random.choices(
-            range(len(self.dataset_df)), k=batch_size)
+        if start_idx is not None:
+            idxs = list(range(
+                start_idx, min(start_idx + batch_size, len(self.dataset_df))))
+        else:
+            idxs = random.choices(
+                range(len(self.dataset_df)), k=batch_size)
         poems = self.dataset_df.iloc[idxs]['poem'].to_list()
         tokenized_poems, _ = self.tokenizer.encode(poems)
 
@@ -340,47 +373,71 @@ class Poetron:
 
         # return reshaped logits and next tokens
         return reshaped_logits, reshaped_next_tokens
+    
+    def _get_model_instance(self):
+        '''
+        Input:
+        None
 
-    def pretrain(self, batch_size, iters=1000, lr=1e-3, log_iters=100):
+        Output:
+        model (PoetronModel) - an instance of the PoetronModel class
+        '''
+        self.logger.info('Instantiating model...')
+
+        # create an instance of the PoetronModel class
+        model = PoetronModel(
+            vocab_size=self.tokenizer.vocab_size,
+            embed_dim=64,
+            context_size=self.context_size,
+            num_attn_heads=4,
+            attn_head_size=16,
+            hidden_size=64,
+            num_hidden_layers=1,
+            num_attn_blocks=4,
+            device=self.device)
+        self.logger.info('Instantiated model')
+
+        # return PoetronModel instance
+        return model
+
+
+    def pretrain(self, batch_size, epochs=5, log_epochs=1):
         '''
         Input:
         batch_size (int) - size of each batch of input token sequences and
         their corresponding next tokens
         epochs (int) - number of pretraining epochs
+        log_epochs (int) - number of epochs after which to print loss and
+        generate a sample poem
         '''
         # get dataset and create tokenizer
         self._get_dataset()
         self._get_tokenizer()
 
         # instantiate model
-        self.model = PoetronModel(
-            vocab_size=self.tokenizer.vocab_size,
-            embed_dim=64,
-            context_size=self.context_size,
-            num_attn_heads=4,
-            attn_head_size=32,
-            hidden_size=128,
-            num_hidden_layers=2,
-            num_attn_blocks=6,
-            device=self.device
-        ).to(self.device)
+        self.model = self._get_model_instance().to(self.device)
         self.model.train()
 
         # create optimizer
-        optimizer = AdamW(self.model.parameters(), lr=lr)
+        optimizer = AdamW(self.model.parameters(), lr=1e-3)
 
-        # pretrain model
-        for iter in tqdm(range(iters)):
-            # reset gradients
-            optimizer.zero_grad()
+        def _pretrain_fw_pass(
+                batch_inputs, batch_input_masks, batch_next_tokens):
+            '''
+            Input:
+            batch_inputs (torch.Tensor[int]) - tensor of input tokens, shape is
+            (batch size, context size)
+            batch_input_masks (torch.Tensor[int]) - tensor of input masks, shape
+            is (batch size, context size)
+            batch_next_tokens (torch.Tensor[int]) - tensor of next tokens for
+            every contiguous subsequence of tokens in batch_inputs, shape is
+            (batch size, context size)
 
-            # get batch
-            batch_inputs, batch_input_masks, batch_next_tokens = \
-                self._get_batch(batch_size)
-            batch_inputs = batch_inputs.to(self.device)
-            batch_input_masks = batch_input_masks.to(self.device)
-            batch_next_tokens = batch_next_tokens.to(self.device)
-
+            Output:
+            loss (torch.Tensor[float]) - loss value obtained from output of
+            forward pass with the given batch of inputs, input masks, and next
+            tokens
+            '''
             # get logits (enriched token embeddings, projected to vocab_size
             # dimensions)
             batch_logits = self.model(batch_inputs, batch_input_masks)
@@ -394,19 +451,72 @@ class Poetron:
             loss = F.cross_entropy(
                 reshaped_logits, reshaped_next_tokens.type(torch.long),
                 reduction='mean')
+            
+            # return loss
+            return loss
+        
+        @torch.no_grad()
+        def _get_eval_loss():
+            '''
+            Input:
+            None
 
-            # backpropagate loss to update weights
-            loss.backward()
-            optimizer.step()
+            Output:
+            loss (torch.Tensor[float]) - returns loss of a pretraining forward
+            pass on a random batch of samples
+            '''
+
+            # get batch of random samples
+            batch_inputs, batch_input_masks, batch_next_tokens = \
+                self._get_batch(batch_size, None)
+            batch_inputs = batch_inputs.to(self.device)
+            batch_input_masks = batch_input_masks.to(self.device)
+            batch_next_tokens = batch_next_tokens.to(self.device)
+            
+            # get and return loss
+            loss = _pretrain_fw_pass(
+                batch_inputs, batch_input_masks, batch_next_tokens)
+            return loss
+
+        # pretrain model
+        self.logger.info('Pretraining model...')
+        for epoch in range(epochs):
+            batch_start_idxs = list(range(0, len(self.dataset_df), batch_size))
+            for batch_start_idx in tqdm(
+                batch_start_idxs, desc=f'Epoch {epoch + 1} of {epochs}'):
+                # reset gradients
+                optimizer.zero_grad()
+
+                # get batch
+                batch_inputs, batch_input_masks, batch_next_tokens = \
+                    self._get_batch(batch_size, batch_start_idx)
+                batch_inputs = batch_inputs.to(self.device)
+                batch_input_masks = batch_input_masks.to(self.device)
+                batch_next_tokens = batch_next_tokens.to(self.device)
+
+                # perform a pretraining forward pass, get loss
+                loss = _pretrain_fw_pass(
+                    batch_inputs, batch_input_masks, batch_next_tokens)
+
+                # backpropagate loss to update weights
+                loss.backward()
+                optimizer.step()
+
+                # update batch start index
+                batch_start_idx += batch_size
 
             # after a certain number of iterations, print loss and generate
             # a short poem (use the generate method)
-            if (iter + 1) % log_iters == 0:
+            if (epoch + 1) % log_epochs == 0:
                 sample_poem = self.generate([''], self.context_size - 1,
                                             postprocess=True)[0]
-                print(f'Average loss across batch in iteration {iter + 1}: '
-                       +f'{loss.item()}.\nSample Poem:\n{sample_poem}')
+                eval_loss = _get_eval_loss()
+                self.logger.info(
+                    'Average loss across batch of random samples after epoch '
+                    + f'{epoch + 1}: {eval_loss.item()}.\nSample Poem:\n'
+                    + f'{sample_poem}')
         self.model.eval()
+        self.logger.info('Finished pretraining model')
 
     @torch.no_grad()
     def generate(self, input_texts, max_new_tokens, postprocess=False):
@@ -479,3 +589,35 @@ class Poetron:
 
         # return texts
         return generated_texts
+
+    def save(self, save_dir=DEFAULT_SAVE_DIR):
+        # create save directory if it doesn't already exist
+        if not os.path.isdir(save_dir):
+            os.makedirs(save_dir, exist_ok=True)
+
+        # save tokenizer
+        tokenizer_save_path = os.path.join(save_dir, 'tokenizer.pkl')
+        with open(tokenizer_save_path, 'wb') as tokenizer_file:
+            pickle.dump(self.tokenizer, tokenizer_file)
+        self.logger.info(f'Saved tokenizer to {tokenizer_save_path}')
+
+        # save model
+        model_save_path = os.path.join(save_dir, 'model_state_dict.pth')
+        torch.save(self.model.state_dict(), model_save_path)
+        self.logger.info(
+            f'Saved model parameters and buffers to {model_save_path}')
+
+    def load(self, load_dir=DEFAULT_SAVE_DIR):
+        # load tokenizer
+        tokenizer_save_path = os.path.join(load_dir, 'tokenizer.pkl')
+        with open(tokenizer_save_path, 'rb') as tokenizer_file:
+            self.tokenizer = pickle.load(tokenizer_file)
+        self.logger.info(f'Loaded tokenizer from {tokenizer_save_path}')
+
+        # load model
+        model_save_path = os.path.join(load_dir, 'model_state_dict.pth')
+        self.model = self._get_model_instance().to(self.device)
+        self.model.load_state_dict(torch.load(model_save_path))
+        self.model.eval()
+        self.logger.info(
+            f'Loaded model parameters and buffers from {model_save_path}')

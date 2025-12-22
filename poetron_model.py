@@ -19,7 +19,7 @@ class SelfAttnHead(nn.Module):
 
         # lower triangular mask so tokens are not influenced by subsequent
         # tokens in the attention mechanism
-        self.register_buffer('attn_mask', torch.tril(
+        self.register_buffer('causal_mask', torch.tril(
             torch.ones(self.context_size, self.context_size)))
 
         # query, key, and value projection layers
@@ -53,7 +53,7 @@ class SelfAttnHead(nn.Module):
         '''
         return attn_pattern * scaling_factor
     
-    def _apply_subseq_mask(self, attn_pattern):
+    def _apply_causal_mask(self, attn_pattern):
         '''
         Input:
         attn_pattern (torch.Tensor[float]) - attention pattern, shape is
@@ -63,7 +63,7 @@ class SelfAttnHead(nn.Module):
         masked attention pattern (torch.Tensor[float]) - attention pattern, with
         masking applied to subsequent tokens
         '''
-        return attn_pattern.masked_fill(self.attn_mask == 0, float('-inf'))
+        return attn_pattern.masked_fill(self.causal_mask == 0, float('-inf'))
     
     def _apply_input_mask(self, attn_pattern, input_mask):
         '''
@@ -143,7 +143,7 @@ class SelfAttnHead(nn.Module):
             init_attn_pattern,
             1 / torch.sqrt(torch.Tensor([self.attn_head_size])).item())
         # masked attention pattern (masking applied to subsequent tokens)
-        masked_attn_pattern = self._apply_subseq_mask(scaled_attn_pattern)
+        masked_attn_pattern = self._apply_causal_mask(scaled_attn_pattern)
         # masked attention pattern (input mask applied)
         masked_attn_pattern = self._apply_input_mask(
             masked_attn_pattern, input_mask)
