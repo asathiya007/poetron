@@ -1,6 +1,6 @@
 # Poetron
 
-Poetron is an AI system that uses a custom generative pretrained transformer (GPT) language model for writing short poems.
+Poetron is an AI system that uses a custom generative pretrained transformer (GPT) language model to write short poems.
 
 See the `poetron.ipynb` notebook for a demo.
 
