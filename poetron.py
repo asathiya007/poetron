@@ -551,10 +551,18 @@ class Poetron:
         self.logger.info('Finished pretraining model')
 
     @torch.no_grad()
-    def generate(self, input_texts, max_new_tokens, postprocess=False):
+    def generate(self, input_texts, max_new_tokens, postprocess=False,
+                 top_k=None):
         '''
         Input:
         input_texts (list[str]) - list of input poem texts to complete
+        max_new_tokens (int) - maximum number of new tokens to generate
+        postprocess (bool) - boolean for removing special tokens and only
+        returning the text between the poem start token and the first
+        occurrence of the poem end token
+        top_k (int or None) - an integer k for top-k sampling (only the k
+        tokens with the highest probability are used for sampling the next
+        token) 
 
         Output:
         output_texts (list[str]) - list of completed poem texts
@@ -581,6 +589,21 @@ class Poetron:
             # use softmax function to get probability distribution over
             # vocabulary (shape is batch size, vocab size)
             next_token_dists = F.softmax(logits, dim=1)
+
+            # update probabilities for top k sampling
+            if top_k is not None:
+                # zero out probabilities outside the top k
+                top_k_token_idxs = torch.topk(
+                    next_token_dists, top_k, dim=1).indices
+                mask = torch.zeros_like(next_token_dists)
+                batch_idxs = torch.arange(next_token_dists.shape[0]).reshape(
+                    (next_token_dists.shape[0], 1))
+                mask[batch_idxs, top_k_token_idxs] = 1
+                next_token_dists = next_token_dists * mask
+
+                # normalize probabilities so they sum to 1
+                next_token_dists = next_token_dists / next_token_dists.sum(
+                    dim=1).reshape(next_token_dists.shape[0], 1)
 
             # sample from distributions to get next tokens (shape is batch size,
             # 1)
