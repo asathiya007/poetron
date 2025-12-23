@@ -183,9 +183,10 @@ class MultiHeadAttn(nn.Module):
         self.attn_head_size = attn_head_size
     
         # create attention heads
-        self.attn_heads = nn.ModuleList([
-            SelfAttnHead(self.embed_dim, self.attn_head_size, self.context_size)
-        ] * self.num_attn_heads)
+        self.attn_heads = nn.ModuleList([])
+        for _ in range(self.num_attn_heads):
+            self.attn_heads.append(SelfAttnHead(
+                self.embed_dim, self.attn_head_size, self.context_size))
 
         # output projection layer
         self.o_proj = nn.Linear(
@@ -261,10 +262,12 @@ class FeedFwd(nn.Module):
             nn.Linear(embed_dim, hidden_size),
             nn.ReLU()
         ]
-        hidden_layers = [
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU()
-        ] * num_hidden_layers
+        hidden_layers = []
+        for _ in range(self.num_hidden_layers):
+            hidden_layers.extend([
+                nn.Linear(hidden_size, hidden_size),
+                nn.ReLU()
+            ])
         output_layer = [
             nn.Linear(hidden_size, embed_dim)
         ]
@@ -388,11 +391,11 @@ class PoetronModel(nn.Module):
         self.sin_pos_embeds = self._get_sin_pos_embeds()
 
         # attention blocks
-        self.attn_blocks = nn.ModuleList([
-            AttnBlock(
+        self.attn_blocks = nn.ModuleList([])
+        for _ in range(self.num_attn_blocks):
+            self.attn_blocks.append(AttnBlock(
                 self.embed_dim, self.context_size, self.num_attn_heads,
-                self.attn_head_size, self.hidden_size, self.num_hidden_layers)
-        ] * self.num_attn_blocks)
+                self.attn_head_size, self.hidden_size, self.num_hidden_layers))
 
         # output projection layer
         self.o_proj = nn.Linear(self.embed_dim, self.vocab_size)

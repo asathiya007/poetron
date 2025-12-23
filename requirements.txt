@@ -1,4 +1,5 @@
-kagglehub
-pandas
-torch
-tqdm
+kagglehub==0.3.13
+pandas==2.3.3
+torch==2.9.1
+tqdm==4.67.1
+alt-profanity-check==1.7.2

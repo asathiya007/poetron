@@ -4,6 +4,7 @@ import os
 import pandas as pd
 import pickle
 from poetron_model import PoetronModel
+from profanity_check import predict as predict_profanity
 import random
 import sys
 import torch
@@ -52,7 +53,9 @@ class PoetronTokenizer:
                     * self.token_to_int[self.padding_token], tensor],
                 dim=-1)
         elif len(tensor) > self.max_length:
-            new_tensor = tensor[-self.max_length:]
+            new_tensor = tensor[-self.max_length:].clone()
+        else:
+            new_tensor = tensor.clone()
         new_tensor = new_tensor.type(INT_DATA_TYPE)
         mask = (new_tensor != self.token_to_int[self.padding_token]).type(
                 INT_DATA_TYPE)
@@ -191,7 +194,7 @@ class Poetron:
             self.poem_end_token]
 
         # set context size
-        self.context_size = 200
+        self.context_size = 250
 
         # set device
         if torch.cuda.is_available():
@@ -207,13 +210,34 @@ class Poetron:
         logging.basicConfig(stream=sys.stdout)
 
     def _get_dataset(self):
-        self.logger.info('Downloading and processing dataset...')
+        self.logger.info('Downloading and processing datasets...')
+
+        # download dataset, remove rows with missing values
+        path = kagglehub.dataset_download('hjhalani30/haiku-dataset')
+        dataset_df1 = pd.read_csv(os.path.join(path, 'all_haiku.csv'))
+        dataset_df1 = dataset_df1.dropna().reset_index(drop=True)
+        # consolidate columns to get full poem, with special tokens
+        dataset_df1['poem'] = self.poem_start_token\
+            + dataset_df1['0'].str.strip().str.lower() + self.line_end_token\
+            + dataset_df1['1'].str.strip().str.lower() + self.line_end_token\
+            + dataset_df1['2'].str.strip().str.lower() + self.poem_end_token
+        # check for profanity
+        poems = list(filter(
+            lambda p: int(predict_profanity([p])[0]) == 0,
+            list(dataset_df1['poem'])))
+        dataset_df1 = pd.DataFrame({'poem': poems})
 
         # download dataset and process poems
         path = kagglehub.dataset_download('bfbarry/haiku-dataset')
-        poems_dataset = []
+        dataset2 = []
         with open(os.path.join(path, 'lines.txt'), 'r') as poems_file:
             for poem in poems_file:
+                # check for profanity
+                contains_profanity = int(predict_profanity([poem])[0])
+                if contains_profanity == 1:
+                    continue
+
+                # process poem and check for empty lines
                 proc_poem = poem.lower().replace('$', '')
                 proc_poem_lines = proc_poem.split('/')
                 empty_line_present = False
@@ -227,9 +251,13 @@ class Poetron:
                 proc_poem = self.poem_start_token\
                     + self.line_end_token.join(proc_poem_lines)\
                     + self.poem_end_token
-                poems_dataset.append(proc_poem)
-        self.dataset_df = pd.DataFrame({'poem': poems_dataset})
-        self.logger.info('Downloaded and processed dataset')
+                dataset2.append(proc_poem)
+        dataset_df2 = pd.DataFrame({'poem': dataset2})
+
+        # combine datasets
+        self.dataset_df = pd.concat(
+            [dataset_df1, dataset_df2], axis=0, ignore_index=True)
+        self.logger.info('Downloaded and processed datasets')
 
     def _get_tokenizer(self):
         self.logger.info('Creating tokenizer...')
@@ -388,14 +416,18 @@ class Poetron:
         model = PoetronModel(
             vocab_size=self.tokenizer.vocab_size,
             embed_dim=64,
-            context_size=self.context_size,
+            context_size=250,
             num_attn_heads=4,
-            attn_head_size=16,
-            hidden_size=64,
+            attn_head_size=32,
+            hidden_size=128,
             num_hidden_layers=1,
-            num_attn_blocks=4,
-            device=self.device)
+            num_attn_blocks=6,
+            device=self.device).to(self.device)
         self.logger.info('Instantiated model')
+
+        # print number of parameters
+        num_params = sum(p.numel() for p in model.parameters())
+        self.logger.info(f'Model has {num_params / 1e6}M parameters')
 
         # return PoetronModel instance
         return model
@@ -415,11 +447,11 @@ class Poetron:
         self._get_tokenizer()
 
         # instantiate model
-        self.model = self._get_model_instance().to(self.device)
+        self.model = self._get_model_instance()
         self.model.train()
 
         # create optimizer
-        optimizer = AdamW(self.model.parameters(), lr=1e-3)
+        optimizer = AdamW(self.model.parameters(), lr=5e-4)
 
         def _pretrain_fw_pass(
                 batch_inputs, batch_input_masks, batch_next_tokens):
@@ -616,7 +648,7 @@ class Poetron:
 
         # load model
         model_save_path = os.path.join(load_dir, 'model_state_dict.pth')
-        self.model = self._get_model_instance().to(self.device)
+        self.model = self._get_model_instance()
         self.model.load_state_dict(torch.load(model_save_path))
         self.model.eval()
         self.logger.info(
