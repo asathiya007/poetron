@@ -361,6 +361,7 @@ class PoetronModel(nn.Module):
                  num_attn_blocks, device):
         '''
         Input:
+        vocab_size (int) - number of tokens in the vocabulary
         embed_dim (int) - number of dimensions of token embedding
         context_size (int) - number of tokens in a single input
         num_attn_heads (int) - number of self-attention heads per attention
@@ -371,6 +372,7 @@ class PoetronModel(nn.Module):
         attention block
         num_hidden_layers (int) - number of hidden layers in the feed-forward
         network of each attention block
+        num_attn_blocks (int) - number of attention blocks
         device (torch.device) - the device that the model is running on
         '''
         super().__init__()
