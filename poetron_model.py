@@ -354,7 +354,7 @@ class AttnBlock(nn.Module):
 
 class PoetronModel(nn.Module):
     '''
-    A language model for generating/completing three-line poems
+    A language model for generating/completing short poems
     '''
     def __init__(self, vocab_size, embed_dim, context_size, num_attn_heads,
                  attn_head_size, hidden_size, num_hidden_layers,
