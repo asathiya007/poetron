@@ -5,7 +5,7 @@ Poetron is an AI system that uses a custom generative pretrained transformer (GP
 See the `poetron.ipynb` notebook for a demo.
 
 The Poetron language model is trained on data from these datasets:
-- Haiku Dataset by Harshit Jhalani: [https://www.kaggle.com/datasets/hjhalani30/haiku-dataset](https://www.kaggle.com/datasets/hjhalani30/haiku-dataset). This dataset is licensed under the Attribution 4.0 International license, more info is available here: [https://creativecommons.org/licenses/by/4.0/](https://creativecommons.org/licenses/by/4.0/). The data is preprocessed (see code for more details) before it is used to train the language model.
+- Haiku Dataset by Harshit Jhalani: [https://www.kaggle.com/datasets/hjhalani30/haiku-dataset](https://www.kaggle.com/datasets/hjhalani30/haiku-dataset). This dataset is licensed under the Attribution 4.0 International license, more info is available here: [https://creativecommons.org/licenses/by/4.0/legalcode.en](https://creativecommons.org/licenses/by/4.0/legalcode.en). The data is preprocessed (see code for more details) before it is used to train the language model.
 - Haiku Dataset by bfbarry: [https://www.kaggle.com/datasets/bfbarry/haiku-dataset](https://www.kaggle.com/datasets/bfbarry/haiku-dataset)
 
 Poetron's implementation is based on the following sources.
