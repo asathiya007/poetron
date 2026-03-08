@@ -133,7 +133,7 @@ class SelfAttnHead(nn.Module):
         # (batch size, context size, attn head size),
         # (batch size, context size, attn head size)
         q = self.q_proj(x)
-        k = self.q_proj(x)
+        k = self.k_proj(x)
         v = self.v_proj(x)
 
         # get attention pattern
