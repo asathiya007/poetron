@@ -4,16 +4,14 @@ import math
 
 
 class SelfAttnHead(nn.Module):
-    def __init__(self, embed_dim, attn_head_size, context_size):
+    def __init__(self, attn_head_size, context_size):
         '''
         Input:
-        embed_dim (int) - number of dimensions of token embedding
         attn_head_size (int) - number of dimensions of projection layer outputs
         as well as attention head output
         context_size (int) - number of tokens in a single input
         '''
         super().__init__()
-        self.embed_dim = embed_dim
         self.attn_head_size = attn_head_size
         self.context_size = context_size
 
@@ -23,9 +21,9 @@ class SelfAttnHead(nn.Module):
             torch.ones(self.context_size, self.context_size)))
 
         # query, key, and value projection layers
-        self.q_proj = nn.Linear(self.embed_dim, self.attn_head_size)
-        self.k_proj = nn.Linear(self.embed_dim, self.attn_head_size)
-        self.v_proj = nn.Linear(self.embed_dim, self.attn_head_size)
+        self.q_proj = nn.Linear(self.attn_head_size, self.attn_head_size)
+        self.k_proj = nn.Linear(self.attn_head_size, self.attn_head_size)
+        self.v_proj = nn.Linear(self.attn_head_size, self.attn_head_size)
 
     def _get_init_attn_pattern(self, q, k):
         '''
@@ -110,11 +108,15 @@ class SelfAttnHead(nn.Module):
         '''
         return torch.softmax(attn_pattern, dim=-1)
 
-    def forward(self, x, input_mask):
+    def forward(self, mha_q, mha_k, mha_v, input_mask):
         '''
         Input:
-        x (torch.Tensor[float]) - token embeddings, shape is
-        (batch size, context size, embed dim)
+        mha_q (torch.Tensor[float]) - query vectors, shape is
+        (batch size, context size, attn head size)
+        mha_k (torch.Tensor[float]) - key vectors, shape is
+        (batch size, context size, attn head size)
+        mha_v (torch.Tensor[float]) - value vectors, shape is
+        (batch size, context size, attn head size)
         input_mask (torch.Tensor[int]) - mask on input tokens (0 for tokens to
         ignore (like padding tokens), 1 for tokens to collect info from), shape
         is (batch size, context size)
@@ -125,16 +127,19 @@ class SelfAttnHead(nn.Module):
         (batch size, context size, attn head size)
         '''
 
-        # get query, key, and value projections of token embeddings
-        # input: x (token embeddings)
-        # input shape: (batch size, context size, embed dim)
+        # get head-specific query, key, and value projections
+        # input: mha_q, mha_k, mha_v (initial query, key, and value vectors,
+        # given to all attention heads)
+        # input shapes: (batch size, context size, attn head size),
+        # (batch size, context size, attn head size),
+        # (batch size, context size, attn head size)
         # outputs: q, k, v
         # output shapes: (batch size, context size, attn head size),
         # (batch size, context size, attn head size),
         # (batch size, context size, attn head size)
-        q = self.q_proj(x)
-        k = self.k_proj(x)
-        v = self.v_proj(x)
+        q = self.q_proj(mha_q)
+        k = self.k_proj(mha_k)
+        v = self.v_proj(mha_v)
 
         # get attention pattern
         init_attn_pattern = self._get_init_attn_pattern(q, k)
@@ -181,12 +186,17 @@ class MultiHeadAttn(nn.Module):
         self.context_size = context_size
         self.num_attn_heads = num_attn_heads
         self.attn_head_size = attn_head_size
+
+        # query, key, and value projection layers
+        self.mha_q_proj = nn.Linear(self.embed_dim, self.attn_head_size)
+        self.mha_k_proj = nn.Linear(self.embed_dim, self.attn_head_size)
+        self.mha_v_proj = nn.Linear(self.embed_dim, self.attn_head_size)
     
         # create attention heads
         self.attn_heads = nn.ModuleList([])
         for _ in range(self.num_attn_heads):
             self.attn_heads.append(SelfAttnHead(
-                self.embed_dim, self.attn_head_size, self.context_size))
+                self.attn_head_size, self.context_size))
 
         # output projection layer
         self.o_proj = nn.Linear(
@@ -206,7 +216,23 @@ class MultiHeadAttn(nn.Module):
         of concatentated self-attention head outputs, shape is 
         (batch size, context size, attn head size * num attn heads)
         '''
-        self_attn_head_outputs = [sah(x, input_mask) for sah in self.attn_heads]
+
+        # get query, key, and value projections of token embeddings
+        # input: x (token embeddings)
+        # input shapes: (batch size, context size, embed dim),
+        # (batch size, context size, embed dim),
+        # (batch size, context size, embed dim)
+        # outputs: q, k, v
+        # output shapes: (batch size, context size, attn head size),
+        # (batch size, context size, attn head size),
+        # (batch size, context size, attn head size)
+        mha_q = self.mha_q_proj(x)
+        mha_k = self.mha_k_proj(x)
+        mha_v = self.mha_v_proj(x)
+
+        # get concatenated attention head outputs
+        self_attn_head_outputs = [
+            sah(mha_q, mha_k, mha_v, input_mask) for sah in self.attn_heads]
         concat_sah_outputs = torch.cat(self_attn_head_outputs, dim=-1)
         return concat_sah_outputs
 

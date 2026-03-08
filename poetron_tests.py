@@ -285,8 +285,7 @@ def test_get_init_attn_pattern():
         q, k, exp_attn_pattern = test_case
         attn_head_size = q.shape[2]
         context_size = q.shape[1]
-        sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, attn_head_size, context_size)
+        sah = SelfAttnHead(attn_head_size, context_size)
         act_attn_pattern = sah._get_init_attn_pattern(q, k)
         _check_attn_pattern(i + 1, exp_attn_pattern, act_attn_pattern)
 
@@ -326,8 +325,7 @@ def test_scale_attn_pattern():
         test_case = TEST_CASES[i]
         attn_pattern, scaling_factor, exp_scaled_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
-        sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
+        sah = SelfAttnHead(PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
         act_scaled_attn_pattern = sah._scale_attn_pattern(
             attn_pattern, scaling_factor)
         _check_attn_pattern(
@@ -375,8 +373,7 @@ def test_apply_causal_mask():
         test_case = TEST_CASES[i]
         attn_pattern, exp_masked_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
-        sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
+        sah = SelfAttnHead(PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
         act_masked_attn_pattern = sah._apply_causal_mask(attn_pattern)
         _check_attn_pattern(
             i + 1, exp_masked_attn_pattern, act_masked_attn_pattern)
@@ -443,8 +440,7 @@ def test_apply_input_mask():
         test_case = TEST_CASES[i]
         attn_pattern, input_mask, exp_masked_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
-        sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
+        sah = SelfAttnHead(PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
         act_masked_attn_pattern = sah._apply_input_mask(
             attn_pattern, input_mask)
         _check_attn_pattern(
@@ -515,8 +511,7 @@ def test_resolve_neg_inf_rows():
         test_case = TEST_CASES[i]
         attn_pattern, exp_resolved_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
-        sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
+        sah = SelfAttnHead(PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
         act_resolved_attn_pattern = sah._resolve_neg_inf_rows(attn_pattern)
         _check_attn_pattern(
             i + 1, exp_resolved_attn_pattern, act_resolved_attn_pattern)
@@ -584,8 +579,7 @@ def test_normalize_attn_pattern():
         test_case = TEST_CASES[i]
         attn_pattern, exp_normalized_attn_pattern = test_case
         context_size = attn_pattern.shape[1]
-        sah = SelfAttnHead(
-            PLACEHOLDER_EMBED_DIM, PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
+        sah = SelfAttnHead(PLACEHOLDER_ATTN_HEAD_SIZE, context_size)
         act_normalized_attn_pattern = sah._normalize_attn_pattern(attn_pattern)
         _check_attn_pattern(
             i + 1, exp_normalized_attn_pattern, act_normalized_attn_pattern)
@@ -599,19 +593,20 @@ def _check_shape(exp_shape, act_shape):
 
 def test_self_attn_output_shape():
     TEST_CASES = [
-        # tuple(embedding dimension, attention head size, context size,
-        # batch size)
-        (20, 16, 100, 4),
-        (48, 24, 50, 10),
-        (16, 32, 80, 10),
-        (32, 48, 96, 4)
+        # tuple(attention head size, context size, batch size)
+        (16, 100, 4),
+        (24, 50, 10),
+        (32, 80, 10),
+        (48, 96, 4)
     ]
     for test_case in TEST_CASES:
-        embed_dim, attn_head_size, context_size, batch_size = test_case
+        attn_head_size, context_size, batch_size = test_case
         input_mask = torch.stack([torch.ones(context_size)] * batch_size, dim=0)
-        sah = SelfAttnHead(embed_dim, attn_head_size, context_size)
-        sah_input = torch.randn((batch_size, context_size, embed_dim))
-        sah_output = sah(sah_input, input_mask)
+        sah = SelfAttnHead(attn_head_size, context_size)
+        sah_input_q = torch.randn((batch_size, context_size, attn_head_size))
+        sah_input_k = torch.randn((batch_size, context_size, attn_head_size))
+        sah_input_v = torch.randn((batch_size, context_size, attn_head_size))
+        sah_output = sah(sah_input_q, sah_input_k, sah_input_v, input_mask)
         exp_output_shape = (batch_size, context_size, attn_head_size)
         act_output_shape = sah_output.shape
         _check_shape(exp_output_shape, act_output_shape)

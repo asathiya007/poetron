@@ -415,11 +415,11 @@ class Poetron:
         # create an instance of the PoetronModel class
         model = PoetronModel(
             vocab_size=self.tokenizer.vocab_size,
-            embed_dim=64,
+            embed_dim=128,
             context_size=250,
-            num_attn_heads=4,
-            attn_head_size=32,
-            hidden_size=128,
+            num_attn_heads=8,
+            attn_head_size=16,
+            hidden_size=512,
             num_hidden_layers=1,
             num_attn_blocks=6,
             device=self.device).to(self.device)
