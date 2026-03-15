@@ -547,8 +547,17 @@ class Poetron:
                     'Average loss across batch of random samples after epoch '
                     + f'{epoch + 1}: {eval_loss.item()}.\nSample Poem:\n'
                     + f'{sample_poem}')
+            
+            # save the model after every epoch (checkpoints)
+            self.logger.info(
+                f'Saving model after {epoch + 1} epochs of pretraining...')
+            self.save(epoch_num=epoch + 1)
         self.model.eval()
         self.logger.info('Finished pretraining model')
+
+        # save final model
+        self.logger.info('Saving pretrained model...')
+        self.save()
 
     @torch.no_grad()
     def generate(self, input_texts, max_new_tokens, postprocess=False,
@@ -645,7 +654,7 @@ class Poetron:
         # return texts
         return generated_texts
 
-    def save(self, save_dir=DEFAULT_SAVE_DIR):
+    def save(self, save_dir=DEFAULT_SAVE_DIR, epoch_num=None):
         # create save directory if it doesn't already exist
         if not os.path.isdir(save_dir):
             os.makedirs(save_dir, exist_ok=True)
@@ -657,12 +666,15 @@ class Poetron:
         self.logger.info(f'Saved tokenizer to {tokenizer_save_path}')
 
         # save model
-        model_save_path = os.path.join(save_dir, 'model_state_dict.pth')
+        file_name = 'model_state_dict'
+        if epoch_num is not None:
+            file_name += f'_epoch{epoch_num}'
+        model_save_path = os.path.join(save_dir, f'{file_name}.pth')
         torch.save(self.model.state_dict(), model_save_path)
         self.logger.info(
             f'Saved model parameters and buffers to {model_save_path}')
 
-    def load(self, load_dir=DEFAULT_SAVE_DIR):
+    def load(self, load_dir=DEFAULT_SAVE_DIR, epoch_num=None):
         # load tokenizer
         tokenizer_save_path = os.path.join(load_dir, 'tokenizer.pkl')
         with open(tokenizer_save_path, 'rb') as tokenizer_file:
@@ -670,7 +682,10 @@ class Poetron:
         self.logger.info(f'Loaded tokenizer from {tokenizer_save_path}')
 
         # load model
-        model_save_path = os.path.join(load_dir, 'model_state_dict.pth')
+        file_name = 'model_state_dict'
+        if epoch_num is not None:
+            file_name += f'_epoch{epoch_num}'
+        model_save_path = os.path.join(load_dir, f'{file_name}.pth')
         self.model = self._get_model_instance()
         self.model.load_state_dict(torch.load(model_save_path))
         self.model.eval()
