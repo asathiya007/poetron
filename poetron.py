@@ -209,7 +209,7 @@ class Poetron:
         self.logger.setLevel(logging.INFO)
         logging.basicConfig(stream=sys.stdout)
 
-    def _get_dataset(self):
+    def _get_dataset(self, test_size=0.2):
         self.logger.info('Downloading and processing datasets...')
 
         # download dataset, remove rows with missing values
@@ -225,7 +225,9 @@ class Poetron:
         poems = list(filter(
             lambda p: int(predict_profanity([p])[0]) == 0,
             list(dataset_df1['poem'])))
-        dataset_df1 = pd.DataFrame({'poem': poems})
+        split_idx = int(len(poems) * (1 - test_size))
+        train_dataset_df1 = pd.DataFrame({'poem': poems[:split_idx]})
+        test_dataset_df1 = pd.DataFrame({'poem': poems[split_idx:]})
 
         # download dataset and process poems
         path = kagglehub.dataset_download('bfbarry/haiku-dataset')
@@ -252,20 +254,29 @@ class Poetron:
                     + self.line_end_token.join(proc_poem_lines)\
                     + self.poem_end_token
                 dataset2.append(proc_poem)
-        dataset_df2 = pd.DataFrame({'poem': dataset2})
+        split_idx = int(len(dataset2) * (1 - test_size))
+        train_dataset_df2 = pd.DataFrame({'poem': dataset2[:split_idx]})
+        test_dataset_df2 = pd.DataFrame({'poem': dataset2[split_idx:]})
 
         # combine datasets
-        self.dataset_df = pd.concat(
-            [dataset_df1, dataset_df2], axis=0, ignore_index=True)
+        self.train_dataset_df = pd.concat(
+            [train_dataset_df1, train_dataset_df2], axis=0, ignore_index=True)
+        self.test_dataset_df = pd.concat(
+            [test_dataset_df1, test_dataset_df2], axis=0, ignore_index=True)
         self.logger.info('Downloaded and processed datasets')
 
     def _get_tokenizer(self):
         self.logger.info('Creating tokenizer...')
 
+        # consolidate datasets
+        dataset_df = pd.concat(
+            [self.train_dataset_df, self.test_dataset_df], axis=0,
+            ignore_index=True)
+
         # get character tokens from dataset (ignoring special tokens)
         chars = set()
-        for i in range(len(self.dataset_df['poem'])):
-            poem = self.dataset_df['poem'][i]
+        for i in range(len(dataset_df['poem'])):
+            poem = dataset_df['poem'][i]
             for special_token in self.special_tokens:
                 poem = poem.replace(special_token, '')
             chars = chars.union(set(poem))
@@ -274,8 +285,8 @@ class Poetron:
         # to get word tokens
         words = set()
         non_alnum_chars = set(filter(lambda c: not c.isalnum(), chars))
-        for i in range(len(self.dataset_df['poem'])):
-            poem = self.dataset_df['poem'][i]
+        for i in range(len(dataset_df['poem'])):
+            poem = dataset_df['poem'][i]
             for special_token in self.special_tokens:
                 poem = poem.replace(special_token, ' ')
             for non_alnum_char in non_alnum_chars:
@@ -303,11 +314,12 @@ class Poetron:
         self.logger.info('Created tokenizer')
 
     # utility function to get batch of training data for pretraining
-    def _get_batch(self, batch_size, start_idx=None):
+    def _get_batch(self, batch_size, dataset_df, start_idx=None):
         '''
         Input:
         batch_size (int) - number of (tokens, next token) pairs to generate
         and return
+        dataset_df (pd.DataFrame) - dataset DataFrame (train or test)
         start_idx (int or None) - the starting index of the batch (if None,
         random indices are used)
 
@@ -323,11 +335,11 @@ class Poetron:
         # sample poems
         if start_idx is not None:
             idxs = list(range(
-                start_idx, min(start_idx + batch_size, len(self.dataset_df))))
+                start_idx, min(start_idx + batch_size, len(dataset_df))))
         else:
             idxs = random.choices(
-                range(len(self.dataset_df)), k=batch_size)
-        poems = self.dataset_df.iloc[idxs]['poem'].to_list()
+                range(len(dataset_df)), k=batch_size)
+        poems = dataset_df.iloc[idxs]['poem'].to_list()
         tokenized_poems, _ = self.tokenizer.encode(poems)
 
         # create inputs and next token pairs
@@ -433,12 +445,13 @@ class Poetron:
         return model
 
 
-    def pretrain(self, batch_size, epochs=5, log_epochs=1):
+    def pretrain(self, batch_size, epochs=5, lr=5e-4, log_epochs=1):
         '''
         Input:
         batch_size (int) - size of each batch of input token sequences and
         their corresponding next tokens
         epochs (int) - number of pretraining epochs
+        lr (float) - learning rate
         log_epochs (int) - number of epochs after which to print loss and
         generate a sample poem
         '''
@@ -451,7 +464,7 @@ class Poetron:
         self.model.train()
 
         # create optimizer
-        optimizer = AdamW(self.model.parameters(), lr=5e-4)
+        optimizer = AdamW(self.model.parameters(), lr=lr)
 
         def _pretrain_fw_pass(
                 batch_inputs, batch_input_masks, batch_next_tokens):
@@ -469,6 +482,8 @@ class Poetron:
             loss (torch.Tensor[float]) - loss value obtained from output of
             forward pass with the given batch of inputs, input masks, and next
             tokens
+            num_examples (int) - number of examples after reshaping logits and
+            next tokens
             '''
             # get logits (enriched token embeddings, projected to vocab_size
             # dimensions)
@@ -478,14 +493,43 @@ class Poetron:
             reshaped_logits, reshaped_next_tokens = \
                 self._reshape_logits_and_next_toks(
                     batch_logits, batch_input_masks, batch_next_tokens)
+            
+            # remove examples where the next token is the padding token or
+            # the start token
+            idxs =  list(range(reshaped_next_tokens.shape[0]))
+            idxs = list(filter(
+                lambda i: (reshaped_next_tokens[i] !=
+                self.tokenizer.token_to_int[self.padding_token])
+                and (reshaped_next_tokens[i] !=
+                self.tokenizer.token_to_int[self.poem_start_token]), idxs))
+            reshaped_logits = reshaped_logits[idxs]
+            reshaped_next_tokens = reshaped_next_tokens[idxs]
+            num_examples = reshaped_next_tokens.shape[0]
 
             # calculate loss
             loss = F.cross_entropy(
                 reshaped_logits, reshaped_next_tokens.type(torch.long),
                 reduction='mean')
             
-            # return loss
-            return loss
+            # return loss and number of examples
+            return loss, num_examples
+        
+        def _compute_avg_example_loss(loss_vals, num_examples_vals):
+            '''
+            Input:
+            loss_vals (list[float]) - list of average loss values, computed for
+            each batch of examples
+            num_examples_vals (list[int]) - list of the numbers of examples
+            in each batch
+
+            Output:
+            avg_ex_loss (float) - average loss value across all examples 
+            '''
+            loss_vals = torch.Tensor(loss_vals).to(self.device)
+            num_examples_vals = torch.Tensor(num_examples_vals).to(self.device)
+            avg_ex_loss = (loss_vals * num_examples_vals).cpu().sum().item() \
+                / num_examples_vals.sum().item()
+            return avg_ex_loss
         
         @torch.no_grad()
         def _get_eval_loss():
@@ -494,58 +538,87 @@ class Poetron:
             None
 
             Output:
-            loss (torch.Tensor[float]) - returns loss of a pretraining forward
-            pass on a random batch of samples
+            loss (float) - average testing example loss
             '''
 
-            # get batch of random samples
-            batch_inputs, batch_input_masks, batch_next_tokens = \
-                self._get_batch(batch_size, None)
-            batch_inputs = batch_inputs.to(self.device)
-            batch_input_masks = batch_input_masks.to(self.device)
-            batch_next_tokens = batch_next_tokens.to(self.device)
-            
-            # get and return loss
-            loss = _pretrain_fw_pass(
-                batch_inputs, batch_input_masks, batch_next_tokens)
-            return loss
-
-        # pretrain model
-        self.logger.info('Pretraining model...')
-        for epoch in range(epochs):
-            batch_start_idxs = list(range(0, len(self.dataset_df), batch_size))
+            # get batch-wise eval loss values and numbers of examples
+            batch_start_idxs = list(
+                range(0, len(self.test_dataset_df), batch_size))
+            loss_vals = []
+            num_examples_vals = []
             for batch_start_idx in tqdm(
-                batch_start_idxs, desc=f'Epoch {epoch + 1} of {epochs}'):
-                # reset gradients
-                optimizer.zero_grad()
+                    batch_start_idxs,
+                    desc=f'Epoch {epoch + 1} of {epochs} (evaluation)'):
 
                 # get batch
                 batch_inputs, batch_input_masks, batch_next_tokens = \
-                    self._get_batch(batch_size, batch_start_idx)
+                    self._get_batch(
+                        batch_size, self.test_dataset_df, batch_start_idx)
                 batch_inputs = batch_inputs.to(self.device)
                 batch_input_masks = batch_input_masks.to(self.device)
                 batch_next_tokens = batch_next_tokens.to(self.device)
 
                 # perform a pretraining forward pass, get loss
-                loss = _pretrain_fw_pass(
+                loss, num_examples = _pretrain_fw_pass(
                     batch_inputs, batch_input_masks, batch_next_tokens)
+                loss_vals.append(loss.item())
+                num_examples_vals.append(num_examples)
+            
+            # get and return average loss on testing examples
+            eval_loss = _compute_avg_example_loss(loss_vals, num_examples_vals)
+            return eval_loss
+
+        # pretrain model
+        self.logger.info('Pretraining model...')
+        for epoch in range(epochs):
+            batch_start_idxs = list(
+                range(0, len(self.train_dataset_df), batch_size))
+            loss_vals = []
+            num_examples_vals = []
+            for batch_start_idx in tqdm(
+                    batch_start_idxs,
+                    desc=f'Epoch {epoch + 1} of {epochs} (training)'):
+                # reset gradients
+                optimizer.zero_grad()
+
+                # get batch
+                batch_inputs, batch_input_masks, batch_next_tokens = \
+                    self._get_batch(
+                        batch_size, self.train_dataset_df, batch_start_idx)
+                batch_inputs = batch_inputs.to(self.device)
+                batch_input_masks = batch_input_masks.to(self.device)
+                batch_next_tokens = batch_next_tokens.to(self.device)
+
+                # perform a pretraining forward pass, get loss
+                loss, num_examples = _pretrain_fw_pass(
+                    batch_inputs, batch_input_masks, batch_next_tokens)
+                loss_vals.append(loss.item())
+                num_examples_vals.append(num_examples)
 
                 # backpropagate loss to update weights
                 loss.backward()
                 optimizer.step()
 
-                # update batch start index
-                batch_start_idx += batch_size
-
             # after a certain number of iterations, print loss and generate
             # a short poem (use the generate method)
             if (epoch + 1) % log_epochs == 0:
+                # generate sample poem
                 sample_poem = self.generate([''], self.context_size - 1,
                                             postprocess=True)[0]
+                
+                # get average loss on training examples
+                train_loss = _compute_avg_example_loss(
+                    loss_vals, num_examples_vals)
+
+                # get average loss on testing examples
                 eval_loss = _get_eval_loss()
+
+                # print results
                 self.logger.info(
-                    'Average loss across batch of random samples after epoch '
-                    + f'{epoch + 1}: {eval_loss.item()}.\nSample Poem:\n'
+                    'Average training example loss after epoch '
+                    + f'{epoch + 1}: {train_loss}.\n'
+                    + 'Average testing example loss after epoch '
+                    + f'{epoch + 1}: {eval_loss}.\nSample Poem:\n'
                     + f'{sample_poem}')
             
             # save the model after every epoch (checkpoints)

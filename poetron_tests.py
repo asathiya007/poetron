@@ -19,45 +19,47 @@ def test_get_dataset():
     # get dataset DataFrame
     p = Poetron()
     p._get_dataset()
-    dataset_df = p.dataset_df
+    dataset_dfs = [p.train_dataset_df, p.test_dataset_df]
 
-    # check dataset columns
-    dataset_cols = dataset_df.columns.to_list()
-    exp_cols = ['poem']
-    assert dataset_cols == exp_cols, 'Incorrect dataset columns. Expected: '\
-        + f'{exp_cols}. Actual: {dataset_cols}'
+    # check datasets
+    for dataset_df in dataset_dfs:
+        # check dataset columns
+        dataset_cols = dataset_df.columns.to_list()
+        exp_cols = ['poem']
+        assert dataset_cols == exp_cols, 'Incorrect dataset columns. '\
+            + f'Expected: {exp_cols}. Actual: {dataset_cols}'
 
-    # check each row of the dataset
-    poem_start_token = p.poem_start_token
-    line_end_token = p.line_end_token
-    poem_end_token = p.poem_end_token
-    for _, row in dataset_df.iterrows():
-        poem = row['poem']
+        # check each row of the dataset
+        poem_start_token = p.poem_start_token
+        line_end_token = p.line_end_token
+        poem_end_token = p.poem_end_token
+        for _, row in dataset_df.iterrows():
+            poem = row['poem']
 
-        # check that the row starts with the poem start token
-        assert poem[:len(poem_start_token)] == poem_start_token, \
-            'Poem does not start with the poem start token '\
-            + f'{poem_start_token}. Poem: {poem}'
+            # check that the row starts with the poem start token
+            assert poem[:len(poem_start_token)] == poem_start_token, \
+                'Poem does not start with the poem start token '\
+                + f'{poem_start_token}. Poem: {poem}'
 
-        # check that the row ends with the poem end token
-        assert poem[-len(poem_end_token):] == poem_end_token, \
-            'Poem does not end with the poem end token '\
-            + f'{poem_end_token}. Poem: {poem}'
+            # check that the row ends with the poem end token
+            assert poem[-len(poem_end_token):] == poem_end_token, \
+                'Poem does not end with the poem end token '\
+                + f'{poem_end_token}. Poem: {poem}'
 
-        # check that there are three non-empty lines of the poem, separated by
-        # the line end token
-        assert line_end_token in poem, 'Poem does not contain line end '\
-            + f'tokens {line_end_token}. Poem: {poem}'
-        poem_lines = poem.replace(poem_start_token, '').replace(
-            poem_end_token, '').split(line_end_token)
-        exp_num_lines = 3
-        act_num_lines = len(poem_lines)
-        assert exp_num_lines == act_num_lines, 'Poem contains incorrect '\
-            + f'number of lines. Expected: {exp_num_lines}. Actual: '\
-            + f'{act_num_lines}. Poem: {poem}'
-        for line in poem_lines:
-            assert len(line) > 0, 'Poem contains an empty line(s). Poem: '\
-                + f'{poem}'
+            # check that there are three non-empty lines of the poem, separated
+            # by the line end token
+            assert line_end_token in poem, 'Poem does not contain line end '\
+                + f'tokens {line_end_token}. Poem: {poem}'
+            poem_lines = poem.replace(poem_start_token, '').replace(
+                poem_end_token, '').split(line_end_token)
+            exp_num_lines = 3
+            act_num_lines = len(poem_lines)
+            assert exp_num_lines == act_num_lines, 'Poem contains incorrect '\
+                + f'number of lines. Expected: {exp_num_lines}. Actual: '\
+                + f'{act_num_lines}. Poem: {poem}'
+            for line in poem_lines:
+                assert len(line) > 0, 'Poem contains an empty line(s). Poem: '\
+                    + f'{poem}'
 
 
 def test_get_tokenizer():
@@ -131,7 +133,8 @@ def test_get_tokenizer():
 
         # check shape of encoding and correctness of decoded text
         exp_shape = (1, exp_num_tokens)
-        assert torch.stack(int_tensors, dim=0).shape == exp_shape, \
+        int_tensors = torch.stack(int_tensors, dim=0)
+        assert int_tensors.shape == exp_shape, \
             f'Incorrect shape of encoding output. Expected: {exp_shape}. '\
             + f'Actual: {int_tensors.shape}'
         decoded_text = tokenizer.decode(int_tensors)
@@ -189,7 +192,7 @@ def test_get_batch():
     batch_sizes = [2, 4, 8, 16, 32, 64]
     for batch_size in batch_sizes:
         batch_inputs, batch_input_masks, batch_next_tokens = p._get_batch(
-            batch_size)
+            batch_size, p.train_dataset_df)
 
         # check shape of batch of inputs
         exp_shape = (batch_size, p.context_size)

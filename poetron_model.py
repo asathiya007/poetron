@@ -344,12 +344,12 @@ class AttnBlock(nn.Module):
         self.num_hidden_layers = num_hidden_layers
 
         # multi-head attention
-        self.mah = MultiHeadAttn(
+        self.mha = MultiHeadAttn(
             self.embed_dim, self.context_size, self.num_attn_heads,
             self.attn_head_size)
 
         # layer normalization
-        self.post_mah_layer_norm = nn.LayerNorm(self.embed_dim)
+        self.post_mha_layer_norm = nn.LayerNorm(self.embed_dim)
         self.post_ffwd_layer_norm = nn.LayerNorm(self.embed_dim)
 
         # feed forward network
@@ -370,10 +370,10 @@ class AttnBlock(nn.Module):
         embeddings, shape is (batch size, context size, embed dim)
         '''
         # enrich token embeddings with multi-head attention
-        x = x + self.mah(x, input_mask)
+        x = x + self.mha(x, input_mask)
 
         # layer normalization
-        x = self.post_mah_layer_norm(x)
+        x = self.post_mha_layer_norm(x)
 
         # enrich token embeddings with feed forward network
         x = x + self.ffwd(x)
